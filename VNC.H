@@ -24,24 +24,24 @@
 #define VNC_KEY_ALT	0xFFE9
 #define VNC_KEY_META	0xFFE7
 
-extern int auth_vnc(tcp_Socket *fd, char *passwd);
-extern int init_vnc_client(tcp_Socket *fd);
-extern int setup_vnc_pixelformat(tcp_Socket *fd);
-extern int setup_vnc_encodings(tcp_Socket *fd);
-extern int request_vnc_refresh(tcp_Socket *fd);
-extern int parse_vnc_msg(tcp_Socket *fd);
-extern int parse_vnc_rect(tcp_Socket *fd);
-extern int parse_vnc_raw(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+extern int auth_vnc(SOCKET *fd, char *passwd);
+extern int init_vnc_client(SOCKET *fd);
+extern int setup_vnc_pixelformat(SOCKET *fd);
+extern int setup_vnc_encodings(SOCKET *fd);
+extern int request_vnc_refresh(SOCKET *fd);
+extern int parse_vnc_msg(SOCKET *fd);
+extern int parse_vnc_rect(SOCKET *fd);
+extern int parse_vnc_raw(SOCKET *fd, int *x, int *y, int *w, int *h,
 			long *p, int *s, unsigned char* buf);
-extern int parse_vnc_copy(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+extern int parse_vnc_copy(SOCKET *fd, int *x, int *y, int *w, int *h,
 			int *srcx, int *srcy);
-extern int parse_vnc_rre(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+extern int parse_vnc_rre(SOCKET *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
-extern int parse_vnc_crre(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+extern int parse_vnc_crre(SOCKET *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
-extern int send_vnc_key(tcp_Socket *fd, int kbd);
-extern int send_vnc_shift(tcp_Socket *fd, int vnc_key, int down);
-extern int send_vnc_pointer(tcp_Socket *fd, int x, int y, int b);
+extern int send_vnc_key(SOCKET *fd, int kbd);
+extern int send_vnc_shift(SOCKET *fd, int vnc_key, int down);
+extern int send_vnc_pointer(SOCKET *fd, int x, int y, int b);
 
 
 #endif

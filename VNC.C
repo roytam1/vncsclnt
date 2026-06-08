@@ -5,7 +5,8 @@
 #include <fcntl.h>
 #include <string.h>
 
-#include <tcp.h>
+#include <windows.h>
+#include <winsock.h>
 
 #include "d3des.h"
 
@@ -20,7 +21,7 @@ rfbRREHeader rfb_rrehead;
 unsigned short rfb_rect;
 unsigned long rfb_pos,rfb_total;
 
-int auth_vnc(tcp_Socket *fd, char *passwd)
+int auth_vnc(SOCKET *fd, char *passwd)
 {
 	CARD8 ch[CHALLENGESIZE];
 	CARD8 key[MAXPWLEN];
@@ -104,7 +105,7 @@ int auth_vnc(tcp_Socket *fd, char *passwd)
 	}
 }
 
-int init_vnc_client(tcp_Socket *fd)
+int init_vnc_client(SOCKET *fd)
 {
 	rfbClientInitMsg clientinit;
 	rfbServerInitMsg serverinit;
@@ -131,7 +132,7 @@ int init_vnc_client(tcp_Socket *fd)
 	return 1;
 }
 
-int setup_vnc_pixelformat(tcp_Socket *fd)
+int setup_vnc_pixelformat(SOCKET *fd)
 {
 
 	rfbSetPixelFormatMsg pixformmsg;
@@ -155,7 +156,7 @@ int setup_vnc_pixelformat(tcp_Socket *fd)
 	return 1;
 }
 
-int setup_vnc_encodings(tcp_Socket *fd)
+int setup_vnc_encodings(SOCKET *fd)
 {
 #define ENCODINGS 4
 	rfbSetEncodingsMsg *encodingsmsgp;
@@ -182,7 +183,7 @@ int setup_vnc_encodings(tcp_Socket *fd)
 	return 1;
 }
 
-int request_vnc_refresh(tcp_Socket *fd)
+int request_vnc_refresh(SOCKET *fd)
 {
 	rfbFramebufferUpdateRequestMsg updreq;
 	static int incremental = 0;
@@ -202,7 +203,7 @@ int request_vnc_refresh(tcp_Socket *fd)
 		return 1;
 }
 
-int parse_vnc_msg(tcp_Socket *fd)
+int parse_vnc_msg(SOCKET *fd)
 {
 	int i;
 	CARD32 i32;
@@ -240,7 +241,7 @@ int parse_vnc_msg(tcp_Socket *fd)
 }
 
 
-int parse_vnc_rect(tcp_Socket *fd)
+int parse_vnc_rect(SOCKET *fd)
 {
 	int i;
 	if (rfb_rect >= rfb_msg.fu.nRects) return ST_IDLE;
@@ -290,7 +291,7 @@ int parse_vnc_rect(tcp_Socket *fd)
 	return ST_ERROR; // unknown encoding scheme
 }
 
-int parse_vnc_raw(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_raw(SOCKET *fd, int *x, int *y, int *w, int *h,
 	long *p, int *s, unsigned char* buf)
 {
 	int i;
@@ -319,7 +320,7 @@ int parse_vnc_raw(tcp_Socket *fd, int *x, int *y, int *w, int *h,
 		return ST_RAW;
 }
 
-int parse_vnc_copy(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_copy(SOCKET *fd, int *x, int *y, int *w, int *h,
 			int *srcx, int *srcy)
 {
 	int i;
@@ -341,7 +342,7 @@ int parse_vnc_copy(tcp_Socket *fd, int *x, int *y, int *w, int *h,
 	return ST_RECT;
 }
 
-int parse_vnc_rre(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_rre(SOCKET *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf)
 {
 	int i;
@@ -375,7 +376,7 @@ int parse_vnc_rre(tcp_Socket *fd, int *x, int *y, int *w, int *h,
 		return ST_RRE;
 }
 
-int parse_vnc_crre(tcp_Socket *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_crre(SOCKET *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf)
 {
 	int i;
@@ -404,7 +405,7 @@ int parse_vnc_crre(tcp_Socket *fd, int *x, int *y, int *w, int *h,
 		return ST_RRE;
 }
 
-int send_vnc_key(tcp_Socket *fd, int kbd)
+int send_vnc_key(SOCKET *fd, int kbd)
 {
 	rfbKeyEventMsg ke = { rfbKeyEvent, 0, 0, 0};
 	CARD16 k = 0;
@@ -442,7 +443,7 @@ int send_vnc_key(tcp_Socket *fd, int kbd)
 	return 1;
 }
 
-int send_vnc_shift(tcp_Socket *fd, int vnc_key, int down)
+int send_vnc_shift(SOCKET *fd, int vnc_key, int down)
 {
 	rfbKeyEventMsg ke = { rfbKeyEvent, 0, 0, 0};
 
@@ -453,7 +454,7 @@ int send_vnc_shift(tcp_Socket *fd, int vnc_key, int down)
 	return 1;
 }
 
-int send_vnc_pointer(tcp_Socket *fd, int x, int y, int b)
+int send_vnc_pointer(SOCKET *fd, int x, int y, int b)
 {
 	rfbPointerEventMsg pe = { rfbPointerEvent, 0, 0, 0};
 
