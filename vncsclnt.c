@@ -271,6 +271,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     WNDCLASS wc;
     MSG msg;
     BOOL bRunning = TRUE;
+    int x, y, w, h, s, srcx, srcy;
+    long p;
 
     /* ... Standard Window Registration & Creation Here ... */
     wc.style         = CS_HREDRAW | CS_VREDRAW;
@@ -333,7 +335,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                         break;
                     case ST_RRE:  
                         g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, video_pixcolor(g_BufIn));
+                        drawbar(x, y, w, h, g_BufIn);
                         break;
                 }
             } else {

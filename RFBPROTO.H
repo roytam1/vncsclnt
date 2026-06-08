@@ -10,7 +10,7 @@
 #define CARD32  unsigned long
 #define INT32   long
 
-#pragma pack(1,push)
+#pragma pack(push,1)
 
 /*
  *  Copyright (C) 1997, 1998 Olivetti & Oracle Research Laboratory

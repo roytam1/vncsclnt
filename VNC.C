@@ -306,13 +306,13 @@ int parse_vnc_msg(struct VncSocket *fd)
 		i = sock_read(fd, ((byte*)&rfb_msg)+sizeof(CARD8), sz_rfbFramebufferUpdateMsg - sizeof(CARD8));
 		rfb_msg.fu.nRects = ntohs(rfb_msg.fu.nRects);
 		rfb_rect=0;
-		dbug_printf("msg: fbu: %d rectangles\n",rfb_msg.fu.nRects);
+		fprintf(stderr, "msg: fbu: %d rectangles\n",rfb_msg.fu.nRects);
 		return ST_RECT;
 
 	case rfbBell:
 		i = sock_read(fd, ((byte*)&rfb_msg)+sizeof(CARD8), sz_rfbBellMsg - sizeof(CARD8));
 		fprintf(stderr,"\007\n");
-		dbug_printf("msg: bell\n");
+		fprintf(stderr, "msg: bell\n");
 		return ST_IDLE;
 
 	case rfbServerCutText:
@@ -320,11 +320,11 @@ int parse_vnc_msg(struct VncSocket *fd)
 		i32 = rfb_msg.sct.length = ntohl(rfb_msg.sct.length);
 		for (i=0; i<i32; i++)
 			sock_read(fd, (byte*)&x, 1);
-		dbug_printf("msg: srv.cuttext: %ld\n",i32);
+		fprintf(stderr, "msg: srv.cuttext: %ld\n",i32);
 		return ST_IDLE;
 
 	default:
-		dbug_printf("msg: unknown: %d\n",rfb_msg.type);
+		fprintf(stderr, "msg: unknown: %d\n",rfb_msg.type);
 		return ST_ERROR;
 	}
 }
@@ -343,7 +343,7 @@ int parse_vnc_rect(struct VncSocket *fd)
 	rfb_uprect.r.w = ntohs(rfb_uprect.r.w);
 	rfb_uprect.r.h = ntohs(rfb_uprect.r.h);
 	rfb_uprect.encoding = ntohl(rfb_uprect.encoding);
-	dbug_printf("  rect: #%d (%d,%d) %dx%d, enc:%ld\n",
+	fprintf(stderr, "  rect: #%d (%d,%d) %dx%d, enc:%ld\n",
 		rfb_rect, rfb_uprect.r.x, rfb_uprect.r.y,
 		rfb_uprect.r.w, rfb_uprect.r.h,	rfb_uprect.encoding);
 			
@@ -370,7 +370,7 @@ int parse_vnc_rect(struct VncSocket *fd)
 
 		rfb_total = rfb_rrehead.nSubrects = ntohl(rfb_rrehead.nSubrects);
 
-		dbug_printf("    enc_rre: %ld subrectangles\n", rfb_total);
+		fprintf(stderr, "    enc_rre: %ld subrectangles\n", rfb_total);
 				
 		rfb_pos=-1;
 		if (rfb_uprect.encoding==rfbEncodingCoRRE)
@@ -390,7 +390,7 @@ int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	i = sock_read(fd, buf, *s);
 	if (i != *s) return ST_ERROR;
 
-	dbug_printf("    enc_raw: %ld of %ld bytes\n",rfb_pos,rfb_total);
+	fprintf(stderr, "    enc_raw: %ld of %ld bytes\n",rfb_pos,rfb_total);
 
 	if (rfb_pos==0) {
 		*x = rfb_uprect.r.x;
@@ -425,7 +425,7 @@ int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	*srcx = copyrect.srcX;
 	*srcy = copyrect.srcY;
 
-	dbug_printf("    enc_copytrct: from (%d,%d)\n",*srcx,*srcy);
+	fprintf(stderr, "    enc_copytrct: from (%d,%d)\n",*srcx,*srcy);
 
 	rfb_rect++;
 	return ST_RECT;
