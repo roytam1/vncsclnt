@@ -24,24 +24,39 @@
 #define VNC_KEY_ALT	0xFFE9
 #define VNC_KEY_META	0xFFE7
 
-extern int auth_vnc(SOCKET *fd, char *passwd);
-extern int init_vnc_client(SOCKET *fd);
-extern int setup_vnc_pixelformat(SOCKET *fd);
-extern int setup_vnc_encodings(SOCKET *fd);
-extern int request_vnc_refresh(SOCKET *fd);
-extern int parse_vnc_msg(SOCKET *fd);
-extern int parse_vnc_rect(SOCKET *fd);
-extern int parse_vnc_raw(SOCKET *fd, int *x, int *y, int *w, int *h,
+/* Define the VncSocket structure to wrap a Win32 SOCKET handle */
+struct VncSocket {
+    SOCKET sock;
+};
+
+extern void sock_init(void);
+extern int socket_connect(struct VncSocket* s, char* host, int port);
+extern int tcp_tick(struct VncSocket* s);
+extern int sock_dataready(struct VncSocket* s);
+extern void sock_close(struct VncSocket* s);
+extern int sock_read(struct VncSocket* s, char* buffer, int len);
+extern int sock_write(struct VncSocket* s, char* buffer, int len);
+extern int sock_getc(struct VncSocket* s);
+extern int sock_putc(struct VncSocket* s, char ch);
+
+extern int auth_vnc(struct VncSocket *fd, char *passwd);
+extern int init_vnc_client(struct VncSocket *fd);
+extern int setup_vnc_pixelformat(struct VncSocket *fd);
+extern int setup_vnc_encodings(struct VncSocket *fd);
+extern int request_vnc_refresh(struct VncSocket *fd);
+extern int parse_vnc_msg(struct VncSocket *fd);
+extern int parse_vnc_rect(struct VncSocket *fd);
+extern int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			long *p, int *s, unsigned char* buf);
-extern int parse_vnc_copy(SOCKET *fd, int *x, int *y, int *w, int *h,
+extern int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			int *srcx, int *srcy);
-extern int parse_vnc_rre(SOCKET *fd, int *x, int *y, int *w, int *h,
+extern int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
-extern int parse_vnc_crre(SOCKET *fd, int *x, int *y, int *w, int *h,
+extern int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
-extern int send_vnc_key(SOCKET *fd, int kbd);
-extern int send_vnc_shift(SOCKET *fd, int vnc_key, int down);
-extern int send_vnc_pointer(SOCKET *fd, int x, int y, int b);
+extern int send_vnc_key(struct VncSocket *fd, int kbd);
+extern int send_vnc_shift(struct VncSocket *fd, int vnc_key, int down);
+extern int send_vnc_pointer(struct VncSocket *fd, int x, int y, int b);
 
 
 #endif

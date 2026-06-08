@@ -21,7 +21,96 @@ rfbRREHeader rfb_rrehead;
 unsigned short rfb_rect;
 unsigned long rfb_pos,rfb_total;
 
-int auth_vnc(SOCKET *fd, char *passwd)
+/* --- WATTCP Core Lifecycle Functions Translation --- */
+
+void sock_init(void) {
+    WSADATA wsaData;
+    /* Initialize Winsock 1.1 for Windows 95 */
+    WSAStartup(MAKEWORD(1, 1), &wsaData);
+}
+
+int socket_connect(struct VncSocket* s, char* host, int port) {
+    struct sockaddr_in serverAddr;
+    unsigned long ip;
+    struct hostent* hp;
+
+    s->sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s->sock == INVALID_SOCKET) return 0;
+
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+
+    /* Resolve host IP or hostname */
+    ip = inet_addr(host);
+    if (ip != INADDR_NONE) {
+        memcpy(&serverAddr.sin_addr, &ip, sizeof(ip));
+    } else {
+        hp = gethostbyname(host);
+        if (!hp) {
+            closesocket(s->sock);
+            return 0;
+        }
+        memcpy(&serverAddr.sin_addr, hp->h_addr, hp->h_length);
+    }
+
+    /* Connect in standard blocking mode (just like DOS) */
+    if (connect(s->sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        closesocket(s->sock);
+        return 0;
+    }
+
+    return 1;
+}
+
+int tcp_tick(struct VncSocket* s) {
+    /* WATTCP requires manual processing ticks. Windows does this automatically.
+       We use Sleep(1) here to yield CPU time to Windows 95, preventing 
+       our infinite loop from pinning a 90s CPU to 100%. */
+    Sleep(1);
+    return (s->sock != INVALID_SOCKET);
+}
+
+int sock_dataready(struct VncSocket* s) {
+    unsigned long bytesAvailable = 0;
+    /* Use ioctlsocket to check if data is waiting in the Windows network buffer */
+    if (ioctlsocket(s->sock, FIONREAD, &bytesAvailable) == SOCKET_ERROR) {
+        return 0;
+    }
+    return (bytesAvailable > 0);
+}
+
+void sock_close(struct VncSocket* s) {
+    if (s->sock != INVALID_SOCKET) {
+        closesocket(s->sock);
+        s->sock = INVALID_SOCKET;
+    }
+}
+
+/* Replaces WATTCP block reads */
+int sock_read(struct VncSocket* s, char* buffer, int len) {
+    /* Because the socket remains blocking, this will behave exactly like DOS */
+    return recv(s->sock, buffer, len, 0);
+}
+
+/* Replaces WATTCP block writes */
+int sock_write(struct VncSocket* s, char* buffer, int len) {
+    return send(s->sock, buffer, len, 0);
+}
+
+/* Replaces WATTCP single character getters */
+int sock_getc(struct VncSocket* s) {
+    char ch;
+    if (recv(s->sock, &ch, 1, 0) <= 0) return -1;
+    return (int)ch;
+}
+
+/* Replaces WATTCP single character putters */
+int sock_putc(struct VncSocket* s, char ch) {
+    return send(s->sock, &ch, 1, 0);
+}
+
+int auth_vnc(struct VncSocket *fd, char *passwd)
 {
 	CARD8 ch[CHALLENGESIZE];
 	CARD8 key[MAXPWLEN];
@@ -105,7 +194,7 @@ int auth_vnc(SOCKET *fd, char *passwd)
 	}
 }
 
-int init_vnc_client(SOCKET *fd)
+int init_vnc_client(struct VncSocket *fd)
 {
 	rfbClientInitMsg clientinit;
 	rfbServerInitMsg serverinit;
@@ -132,7 +221,7 @@ int init_vnc_client(SOCKET *fd)
 	return 1;
 }
 
-int setup_vnc_pixelformat(SOCKET *fd)
+int setup_vnc_pixelformat(struct VncSocket *fd)
 {
 
 	rfbSetPixelFormatMsg pixformmsg;
@@ -156,7 +245,7 @@ int setup_vnc_pixelformat(SOCKET *fd)
 	return 1;
 }
 
-int setup_vnc_encodings(SOCKET *fd)
+int setup_vnc_encodings(struct VncSocket *fd)
 {
 #define ENCODINGS 4
 	rfbSetEncodingsMsg *encodingsmsgp;
@@ -183,7 +272,7 @@ int setup_vnc_encodings(SOCKET *fd)
 	return 1;
 }
 
-int request_vnc_refresh(SOCKET *fd)
+int request_vnc_refresh(struct VncSocket *fd)
 {
 	rfbFramebufferUpdateRequestMsg updreq;
 	static int incremental = 0;
@@ -203,7 +292,7 @@ int request_vnc_refresh(SOCKET *fd)
 		return 1;
 }
 
-int parse_vnc_msg(SOCKET *fd)
+int parse_vnc_msg(struct VncSocket *fd)
 {
 	int i;
 	CARD32 i32;
@@ -241,7 +330,7 @@ int parse_vnc_msg(SOCKET *fd)
 }
 
 
-int parse_vnc_rect(SOCKET *fd)
+int parse_vnc_rect(struct VncSocket *fd)
 {
 	int i;
 	if (rfb_rect >= rfb_msg.fu.nRects) return ST_IDLE;
@@ -291,7 +380,7 @@ int parse_vnc_rect(SOCKET *fd)
 	return ST_ERROR; // unknown encoding scheme
 }
 
-int parse_vnc_raw(SOCKET *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	long *p, int *s, unsigned char* buf)
 {
 	int i;
@@ -320,7 +409,7 @@ int parse_vnc_raw(SOCKET *fd, int *x, int *y, int *w, int *h,
 		return ST_RAW;
 }
 
-int parse_vnc_copy(SOCKET *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			int *srcx, int *srcy)
 {
 	int i;
@@ -342,7 +431,7 @@ int parse_vnc_copy(SOCKET *fd, int *x, int *y, int *w, int *h,
 	return ST_RECT;
 }
 
-int parse_vnc_rre(SOCKET *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf)
 {
 	int i;
@@ -376,7 +465,7 @@ int parse_vnc_rre(SOCKET *fd, int *x, int *y, int *w, int *h,
 		return ST_RRE;
 }
 
-int parse_vnc_crre(SOCKET *fd, int *x, int *y, int *w, int *h,
+int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf)
 {
 	int i;
@@ -405,7 +494,7 @@ int parse_vnc_crre(SOCKET *fd, int *x, int *y, int *w, int *h,
 		return ST_RRE;
 }
 
-int send_vnc_key(SOCKET *fd, int kbd)
+int send_vnc_key(struct VncSocket *fd, int kbd)
 {
 	rfbKeyEventMsg ke = { rfbKeyEvent, 0, 0, 0};
 	CARD16 k = 0;
@@ -443,7 +532,7 @@ int send_vnc_key(SOCKET *fd, int kbd)
 	return 1;
 }
 
-int send_vnc_shift(SOCKET *fd, int vnc_key, int down)
+int send_vnc_shift(struct VncSocket *fd, int vnc_key, int down)
 {
 	rfbKeyEventMsg ke = { rfbKeyEvent, 0, 0, 0};
 
@@ -454,7 +543,7 @@ int send_vnc_shift(SOCKET *fd, int vnc_key, int down)
 	return 1;
 }
 
-int send_vnc_pointer(SOCKET *fd, int x, int y, int b)
+int send_vnc_pointer(struct VncSocket *fd, int x, int y, int b)
 {
 	rfbPointerEventMsg pe = { rfbPointerEvent, 0, 0, 0};
 

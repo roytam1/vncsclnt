@@ -20,29 +20,8 @@
 
 /* --- External VNC Library Functions (Assumed from your repo) --- */
 /* You may need to change 'struct VncSocket' to match your actual structure name */
-struct VncSocket {
-    SOCKET sock;
-    /* Other internal library network fields go here */
-};
 
-extern void sock_init(void);
-extern int  socket_connect(struct VncSocket* s, char* host, int port);
-extern int  auth_vnc(struct VncSocket* s, char* passwd);
-extern int  init_vnc_client(struct VncSocket* s);
-extern int  setup_vnc_pixelformat(struct VncSocket* s);
-extern int  setup_vnc_encodings(struct VncSocket* s);
-extern int  request_vnc_refresh(struct VncSocket* s);
-extern int  tcp_tick(struct VncSocket* s);
-extern int  parse_vnc_msg(struct VncSocket* s);
-extern int  parse_vnc_rect(struct VncSocket* s);
-extern int  parse_vnc_raw(struct VncSocket* s, int* x, int* y, int* w, int* h, long* p, int* src, char* buf);
-extern int  parse_vnc_copy(struct VncSocket* s, int* x, int* y, int* w, int* h, int* sx, int* sy);
-extern int  parse_vnc_rre(struct VncSocket* s, int* x, int* y, int* w, int* h, char* buf);
-extern int  parse_vnc_crre(struct VncSocket* s, int* x, int* y, int* w, int* h, char* buf);
-extern char video_pixcolor(char* buf);
-extern void send_vnc_key(struct VncSocket* s, int keysym);
-extern void send_vnc_pointer(struct VncSocket* s, int x, int y, int button_mask);
-extern void sock_close(struct VncSocket* s);
+#include "vnc.h"
 
 /* --- Global Variables --- */
 HINSTANCE        g_hInst;
@@ -201,11 +180,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                         break;
                     case ST_RRE:
                         g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, video_pixcolor(g_BufIn));
+                        drawbar(x, y, w, h, g_BufIn);
                         break;
                     case ST_CRRE:
                         g_VncState = parse_vnc_crre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, video_pixcolor(g_BufIn));
+                        drawbar(x, y, w, h, g_BufIn);
                         break;
                 }
 
