@@ -1,0 +1,33 @@
+CC=c:\tc\tcc.exe
+LD=c:\tc\tlink.exe
+LIB=c:\tc\lib
+WLIB=c:\wattcp\lib
+#CFLAGS=-1 -G -O -ms -Ic:\tc\include;c:\wattcp\include
+CFLAGS=-ms -Ic:\tc\include;c:\wattcp\include
+LDFLAGS=
+#-Lc:\tc\lib
+OBJS=vncdos.obj vnc.obj video.obj d3des.obj
+PROG=vncdos.exe
+LIBS=$(LIB)\cs.lib $(LIB)\maths.lib $(LIB)\fp87.lib $(WLIB)\wattcpsm.lib
+LIBL=$(LIB)\cl.lib $(LIB)\mathl.lib $(LIB)\fp87.lib $(WLIB)\wattcplg.lib
+LIBH=$(LIB)\ch.lib $(LIB)\mathh.lib $(LIB)\fp87.lib $(WLIB)\wattcphg.lib
+
+all: $(PROG)
+
+$(PROG): $(OBJS)
+	echo $(LIB)\c0s.obj $(OBJS),$(PROG),,+ >tmplnk
+	echo $(LIBS) >>tmplnk
+	$(LD) $(LDFLAGS) @tmplnk
+
+.c.obj:
+	$(CC) $(CFLAGS) -c $<
+
+vncdos.obj: vncdos.c vncdos.h vnc.h video.h
+vnc.obj: vnc.c vncdos.h rfbproto.h
+video.obj: video.c video.h
+
+clean:
+	del *.exe
+	del *.obj
+	del *.map
+	del tmplnk
