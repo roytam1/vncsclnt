@@ -30,6 +30,8 @@ struct VncSocket g_VncSock;
 int              g_VncState         = ST_IDLE;
 char             g_BufIn[65536];    /* Replaces DOS input buffer buffer */
 
+FILE* fout = (FILE*)stderr;
+
 /* GDI Screen Buffering */
 HBITMAP          g_hDIB             = NULL;
 BYTE* g_pPixels          = NULL;
@@ -97,47 +99,6 @@ void drawbar(int x, int y, int w, int h, char color) {
     InvalidateRect(hWndMain, &rect, FALSE);
 }
 
-/* --- VNC Setup Sequence (Synchronous Handshake) --- */
-BOOL StartVNCClient(HWND hwnd, char* host, int port, char* password) {
-    sock_init();
-
-    if (!socket_connect(&g_VncSock, host, port)) {
-        MessageBox(hwnd, "Failed to connect to VNC server.", "Network Error", MB_OK | MB_ICONERROR);
-        return FALSE;
-    }
-
-    if (!auth_vnc(&g_VncSock, password)) {
-        MessageBox(hwnd, "VNC Authentication failed.", "Auth Error", MB_OK | MB_ICONERROR);
-        sock_close(&g_VncSock);
-        return FALSE;
-    }
-
-    if (!init_vnc_client(&g_VncSock)) return FALSE;
-    if (!setup_vnc_pixelformat(&g_VncSock)) return FALSE;
-    if (!setup_vnc_encodings(&g_VncSock)) return FALSE;
-
-    /* Hardcoded resolution fallback for old architecture sizing */
-    if (video_init(640, 480) == -1) {
-        sock_close(&g_VncSock);
-        return FALSE;
-    }
-
-    /* Request initial full screen load */
-    if (!request_vnc_refresh(&g_VncSock)) {
-        sock_close(&g_VncSock);
-        return FALSE;
-    }
-
-    /* Handshake done! Turn socket into an asynchronous Windows Event driver */
-    WSAAsyncSelect(g_VncSock.sock, hwnd, WM_VNC_SOCKET_EVENT, FD_READ | FD_CLOSE);
-    
-    /* Replaces old 220ms countdown logic loop with Windows Timer */
-    SetTimer(hwnd, 1, 220, NULL);
-
-    g_VncState = ST_IDLE;
-    return TRUE;
-}
-
 /* --- Main Windows Message Loop Window Handler --- */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     /* Keep parsing state variables safe across windows messaging cycles */
@@ -146,64 +107,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
     static int srcx, srcy;
 
     switch (message) {
-        case WM_CREATE:
-            /* Automatically start network handshake on startup */
-            /* In production, change arguments to parsed argv entries or input forms */
-            StartVNCClient(hwnd, DEF_HOST, DEF_PORT, "secret");
-            break;
-
-        case WM_VNC_SOCKET_EVENT:
-            if (WSAGETSELECTERROR(lParam)) {
-                MessageBox(hwnd, "VNC Socket Error encountered.", "Error", MB_OK);
-                DestroyWindow(hwnd);
-                break;
-            }
-
-            if (WSAGETSELECTEVENT(lParam) == FD_READ) {
-                /* Run the original DOS parsed loop structure context directly on network trigger */
-                tcp_tick(&g_VncSock);
-                
-                switch(g_VncState) {
-                    case ST_IDLE: 
-                        g_VncState = parse_vnc_msg(&g_VncSock); 
-                        break;
-                    case ST_RECT: 
-                        g_VncState = parse_vnc_rect(&g_VncSock); 
-                        break;
-                    case ST_RAW:  
-                        g_VncState = parse_vnc_raw(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
-                        video_blk(x, y, w, h, p, s, g_BufIn);
-                        break;
-                    case ST_COPY:
-                        g_VncState = parse_vnc_copy(&g_VncSock, &x, &y, &w, &h, &srcx, &srcy);
-                        video_blt(x, y, w, h, srcx, srcy);
-                        break;
-                    case ST_RRE:
-                        g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, g_BufIn);
-                        break;
-                    case ST_CRRE:
-                        g_VncState = parse_vnc_crre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, g_BufIn);
-                        break;
-                }
-
-                if (g_VncState == ST_ERROR) {
-                    MessageBox(hwnd, "RFB protocol parsing error.", "Error", MB_OK);
-                    DestroyWindow(hwnd);
-                }
-            }
-            else if (WSAGETSELECTEVENT(lParam) == FD_CLOSE) {
-                MessageBox(hwnd, "Server disconnected connection.", "Notice", MB_OK);
-                DestroyWindow(hwnd);
-            }
-            break;
-
-        case WM_TIMER:
-            if (wParam == 1) {
-                request_vnc_refresh(&g_VncSock);
-            }
-            break;
 
         case WM_PAINT: {
             PAINTSTRUCT ps;
@@ -254,7 +157,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_DESTROY:
-            KillTimer(hwnd, 1);
             sock_close(&g_VncSock);
             if (g_hDIB) DeleteObject(g_hDIB);
             PostQuitMessage(0);
@@ -273,6 +175,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     BOOL bRunning = TRUE;
     int x, y, w, h, s, srcx, srcy;
     long p;
+
+    fout = fopen("vncsclnt.log", "w");
 
     /* ... Standard Window Registration & Creation Here ... */
     wc.style         = CS_HREDRAW | CS_VREDRAW;
