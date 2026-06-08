@@ -5,6 +5,17 @@
 #define WM_VNC_SOCKET_EVENT (WM_USER + 1)
 #define ID_CONNECT_BUTTON   101
 
+typedef enum {
+    STATE_CONNECTED,
+    STATE_WAITING_FOR_VERSION,
+    STATE_WAITING_FOR_AUTH_TYPES,
+    STATE_WAITING_FOR_AUTH_RESULT,
+    STATE_WAITING_FOR_SERVER_INIT,
+    STATE_READY_FOR_FRAMEBUFFER // Handshake complete!
+} VNC_STATE;
+
+VNC_STATE g_ClientState = STATE_CONNECTED;
+
 // Global Variables
 HINSTANCE hInst;
 HWND hWndMain;
@@ -143,13 +154,48 @@ void HandleVNCNetwork(HWND hwnd, WPARAM wParam, LPARAM lParam) {
     switch (socketEvent) {
         case FD_WRITE:
             // FD_WRITE triggers once when the non-blocking connection successfully establishes
-            MessageBox(hwnd, "Connected to VNC Server! Starting Handshake...", "Success", MB_OK);
+            //MessageBox(hwnd, "Connected to VNC Server! Starting Handshake...", "Success", MB_OK);
             
             // TODO: Step 1 of RFB Protocol: Server sends ProtocolVersion string.
             // In a full client, you'd prepare your state machine here to process incoming bytes.
+
+            // Connection established! Expect the server to talk first.
+            g_ClientState = STATE_WAITING_FOR_VERSION;
             break;
 
         case FD_READ: {
+            switch(g_ClientState) {
+                case STATE_WAITING_FOR_VERSION:
+                    // 1. Read 12 bytes from server
+                    // 2. Send 12 bytes back: send(vncSocket, "RFB 003.003\n", 12, 0);
+                    g_ClientState = STATE_WAITING_FOR_AUTH_TYPES;
+                    break;
+
+                case STATE_WAITING_FOR_AUTH_TYPES:
+                    // 1. Read auth type
+                    // 2. Reply with choice (e.g., 1 for None)
+                    g_ClientState = STATE_WAITING_FOR_AUTH_RESULT;
+                    break;
+
+                case STATE_WAITING_FOR_AUTH_RESULT:
+                    // 1. Read 4-byte status. If 0, success!
+                    // 2. Send ClientInit byte: char shared = 1; send(vncSocket, &shared, 1, 0);
+                    g_ClientState = STATE_WAITING_FOR_SERVER_INIT;
+                    break;
+
+                case STATE_WAITING_FOR_SERVER_INIT:
+                    // 1. Read ServerInit structure (Width, Height, Desktop Name)
+                    // 2. Resize Win95 Window using SetWindowPos()
+                    // 3. Create your DIB Section for drawing
+                    // 4. Send your first FramebufferUpdateRequest!
+                    g_ClientState = STATE_READY_FOR_FRAMEBUFFER;
+                    break;
+
+                case STATE_READY_FOR_FRAMEBUFFER:
+                    // This is standard operation. Parse incoming pixel rectangles here!
+                    break;
+            }
+#if 0
             char buffer[1024];
             int bytesRead = recv(vncSocket, buffer, sizeof(buffer) - 1, 0);
 
@@ -160,6 +206,7 @@ void HandleVNCNetwork(HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 
                 // For a graphical app: Parse pixels -> write to DIB -> InvalidateRect(hwnd, NULL, FALSE);
             }
+#endif
             break;
         }
 
