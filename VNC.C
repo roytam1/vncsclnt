@@ -224,9 +224,6 @@ int init_vnc_client(struct VncSocket *fd)
 	fb_width = ntohs(serverinit.framebufferWidth);
 	fb_height = ntohs(serverinit.framebufferHeight);
 
-	if (fb_width > DOS_XMAX) fb_width = DOS_XMAX;
-	if (fb_height > DOS_YMAX) fb_height = DOS_YMAX;
-
 	i32 = ntohl(serverinit.nameLength);
 	for (i=0; i<i32; i++)
 		sock_read(fd, (byte*)&x, 1);
@@ -399,8 +396,7 @@ int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	long *p, int *s, unsigned char* buf)
 {
 	int i;
-	if (rfb_total-rfb_pos > BUF_IN_MAX) *s = BUF_IN_MAX;
-		else *s = rfb_total-rfb_pos;
+	*s = rfb_total-rfb_pos;
 		
 	i = sock_read(fd, buf, *s);
 	if (i != *s) return ST_ERROR;
@@ -431,6 +427,7 @@ int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	rfbCopyRect copyrect;
 
 	i = sock_read(fd, (byte*)&copyrect, sz_rfbCopyRect);
+	fprintf(fout, " parse_vnc_copy: sock_read returns %d\n",1),fflush(fout);
 	if (i != sz_rfbCopyRect) return ST_ERROR;
 
 	copyrect.srcX = ntohs(copyrect.srcX);

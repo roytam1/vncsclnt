@@ -1,8 +1,6 @@
 #ifndef _DOSVNC_PROTO_H_
 #define _DOSVNC_PROTO_H_
 
-#define BUF_IN_MAX	65536
-
 #define MAXPWLEN	8
 #define CHALLENGESIZE	16
 
@@ -13,11 +11,6 @@
 #define ST_COPY		4
 #define ST_RRE		5
 #define ST_CRRE		7
-
-#define DOS_XMAX	640
-#define DOS_YMAX	480
-#define DOS_ALT_ESC	0x101
-#define DOS_ALT_TILDE	0x129
 
 #define VNC_KEY_SHIFT	0xFFE1
 #define VNC_KEY_CONTROL	0xFFE3
