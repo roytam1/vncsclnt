@@ -1,7 +1,7 @@
 #ifndef _DOSVNC_PROTO_H_
 #define _DOSVNC_PROTO_H_
 
-#define BUF_IN_MAX	512
+#define BUF_IN_MAX	65536
 
 #define MAXPWLEN	8
 #define CHALLENGESIZE	16

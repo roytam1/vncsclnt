@@ -13,6 +13,8 @@
 #include "rfbproto.h"
 #include "vnc.h"
 
+extern FILE* fout;
+
 unsigned short fb_width = 0;
 unsigned short fb_height = 0;
 rfbServerToClientMsg rfb_msg;
@@ -114,7 +116,7 @@ int auth_vnc(struct VncSocket *fd, char *passwd)
 {
 	CARD8 ch[CHALLENGESIZE];
 	CARD8 key[MAXPWLEN];
-	int i;
+	int i, pwlen;
 	rfbProtocolVersionMsg vmsg;
 	CARD32 i32;
 	CARD8 x;
@@ -123,51 +125,62 @@ int auth_vnc(struct VncSocket *fd, char *passwd)
 	sock_write(fd, vmsg, sz_rfbProtocolVersionMsg);
 	sock_read(fd, vmsg, sz_rfbProtocolVersionMsg);
 
+	pwlen = strlen(passwd);
 	i32 = rfbConnFailed;
 	sock_read(fd, (byte*)&i32, sizeof(i32));
 	i32 = ntohl(i32);
 
 	switch(i32) {
 	default:
-		fprintf(stderr, "Unknown Authentification scheme %ld\n",i32);
+		fprintf(fout, "Unknown Authentification scheme %ld\n",i32),fflush(fout);
 	auth_out:
 		sock_close(fd);
 		return 0;
 
 	case rfbConnFailed: /* conn failed */
-		fprintf(stderr,"Connection failed:");
+		fprintf(fout,"Connection failed:"),fflush(fout);
 		i32 = 0;
 		sock_read(fd, (byte*)&i32, sizeof(i32));
 		i32=ntohl(i32);
 		while (i32-- && (sock_read(fd, &x, sizeof(x))==sizeof(x)))
-			fprintf (stderr,"%c", x);
-		fprintf(stderr,"\n");
+			fprintf(fout,"%c", x),fflush(fout);
+		fprintf(fout,"\n"),fflush(fout);
 		goto auth_out;
 
 	case rfbNoAuth:
+		fprintf(fout,"rfbNoAuth\n"),fflush(fout);
 		return 1;
 
 	case rfbVncAuth:
+		fprintf(fout,"rfbVncAuth\n"),fflush(fout);
 		if (sock_read(fd, (byte*)ch, CHALLENGESIZE)!=CHALLENGESIZE) {
-			fprintf(stderr,"VncAuth: challenge read error\n");
+			fprintf(fout,"VncAuth: challenge read error\n"),fflush(fout);
 			goto auth_out;
 		}
 
+		/* pad password with nulls */
 		for(i=0;i<MAXPWLEN;i++)
-		  if (i < strlen(passwd)) key[i]=passwd[i];
+		  if (i < pwlen) key[i]=passwd[i];
 		  		else 	  key[i]=0;
 
+		/* set des key with padded vnc password */
 		deskey(key,EN0);
 
-		for(i=0;i<MAXPWLEN;i++) if (i < strlen(passwd))
-					key[i]=passwd[i]=0;
-		  		else 	  key[i]=0;
+		/* clean up vnc password and key which no longer necessary */
+		for(i=0;i<MAXPWLEN;i++) {
+			if (i < pwlen)
+				key[i]=passwd[i]=0;
+			else
+				key[i]=0;
+		}
 		
+		/* encrypt challenge bytes */
 		for(i = 0; i < CHALLENGESIZE; i+=8)
 			des(ch+i, ch+i);
 
+		/* send back encrypted challenge bytes to server for auth */
 		if (sock_write(fd, (byte*)ch, CHALLENGESIZE)!=CHALLENGESIZE) {
-			fprintf(stderr,"VncAuth: response write error\n");
+			fprintf(fout,"VncAuth: response write error\n"),fflush(fout);
 			goto auth_out;
 		}
 	}
@@ -178,15 +191,15 @@ int auth_vnc(struct VncSocket *fd, char *passwd)
 
 	switch(i32) {
 	default:
-		fprintf(stderr, "VncAuth: Strange\n");
+		fprintf(fout, "VncAuth: Strange\n"),fflush(fout);
 		goto auth_out;
 
 	case rfbVncAuthFailed:
-		fprintf(stderr, "VncAuth: Failed\n");
+		fprintf(fout, "VncAuth: Failed\n"),fflush(fout);
 		goto auth_out;
 
 	case rfbVncAuthTooMany:
-		fprintf(stderr, "VncAuth: Too Many Failures\n");
+		fprintf(fout, "VncAuth: Too Many Failures\n"),fflush(fout);
 		goto auth_out;
 
 	case rfbVncAuthOK:
@@ -277,6 +290,8 @@ int request_vnc_refresh(struct VncSocket *fd)
 	rfbFramebufferUpdateRequestMsg updreq;
 	static int incremental = 0;
 
+	if(fd->sock == INVALID_SOCKET) return 0;
+
 	updreq.type = rfbFramebufferUpdateRequest;
 	updreq.incremental = incremental;
 	incremental=1;
@@ -306,13 +321,13 @@ int parse_vnc_msg(struct VncSocket *fd)
 		i = sock_read(fd, ((byte*)&rfb_msg)+sizeof(CARD8), sz_rfbFramebufferUpdateMsg - sizeof(CARD8));
 		rfb_msg.fu.nRects = ntohs(rfb_msg.fu.nRects);
 		rfb_rect=0;
-		fprintf(stderr, "msg: fbu: %d rectangles\n",rfb_msg.fu.nRects);
+		fprintf(fout, "msg: fbu: %d rectangles\n",rfb_msg.fu.nRects),fflush(fout);
 		return ST_RECT;
 
 	case rfbBell:
 		i = sock_read(fd, ((byte*)&rfb_msg)+sizeof(CARD8), sz_rfbBellMsg - sizeof(CARD8));
-		fprintf(stderr,"\007\n");
-		fprintf(stderr, "msg: bell\n");
+		MessageBeep(0);
+		fprintf(fout, "msg: bell\n"),fflush(fout);
 		return ST_IDLE;
 
 	case rfbServerCutText:
@@ -320,11 +335,11 @@ int parse_vnc_msg(struct VncSocket *fd)
 		i32 = rfb_msg.sct.length = ntohl(rfb_msg.sct.length);
 		for (i=0; i<i32; i++)
 			sock_read(fd, (byte*)&x, 1);
-		fprintf(stderr, "msg: srv.cuttext: %ld\n",i32);
+		fprintf(fout, "msg: srv.cuttext: %ld\n",i32),fflush(fout);
 		return ST_IDLE;
 
 	default:
-		fprintf(stderr, "msg: unknown: %d\n",rfb_msg.type);
+		fprintf(fout, "msg: unknown: %d\n",rfb_msg.type),fflush(fout);
 		return ST_ERROR;
 	}
 }
@@ -343,9 +358,9 @@ int parse_vnc_rect(struct VncSocket *fd)
 	rfb_uprect.r.w = ntohs(rfb_uprect.r.w);
 	rfb_uprect.r.h = ntohs(rfb_uprect.r.h);
 	rfb_uprect.encoding = ntohl(rfb_uprect.encoding);
-	fprintf(stderr, "  rect: #%d (%d,%d) %dx%d, enc:%ld\n",
+	fprintf(fout, "  rect: #%d (%d,%d) %dx%d, enc:%ld\n",
 		rfb_rect, rfb_uprect.r.x, rfb_uprect.r.y,
-		rfb_uprect.r.w, rfb_uprect.r.h,	rfb_uprect.encoding);
+		rfb_uprect.r.w, rfb_uprect.r.h,	rfb_uprect.encoding),fflush(fout);
 			
 	if (    rfb_uprect.r.x >= fb_width || 
 		rfb_uprect.r.x + rfb_uprect.r.w > fb_width ||
@@ -370,7 +385,7 @@ int parse_vnc_rect(struct VncSocket *fd)
 
 		rfb_total = rfb_rrehead.nSubrects = ntohl(rfb_rrehead.nSubrects);
 
-		fprintf(stderr, "    enc_rre: %ld subrectangles\n", rfb_total);
+		fprintf(fout, "    enc_rre: %ld subrectangles\n", rfb_total),fflush(fout);
 				
 		rfb_pos=-1;
 		if (rfb_uprect.encoding==rfbEncodingCoRRE)
@@ -390,7 +405,7 @@ int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	i = sock_read(fd, buf, *s);
 	if (i != *s) return ST_ERROR;
 
-	fprintf(stderr, "    enc_raw: %ld of %ld bytes\n",rfb_pos,rfb_total);
+	fprintf(fout, "    enc_raw: read %d, %ld of %ld bytes\n",*s,rfb_pos,rfb_total),fflush(fout);
 
 	if (rfb_pos==0) {
 		*x = rfb_uprect.r.x;
@@ -425,7 +440,7 @@ int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	*srcx = copyrect.srcX;
 	*srcy = copyrect.srcY;
 
-	fprintf(stderr, "    enc_copytrct: from (%d,%d)\n",*srcx,*srcy);
+	fprintf(fout, "    enc_copytrct: from (%d,%d)\n",*srcx,*srcy),fflush(fout);
 
 	rfb_rect++;
 	return ST_RECT;
