@@ -23,12 +23,17 @@
 
 #include "vnc.h"
 
+/* VNC.C screen size from VNC server */
+extern unsigned short fb_width;
+extern unsigned short fb_height;
+
+
 /* --- Global Variables --- */
 HINSTANCE        g_hInst;
 HWND             hWndMain           = NULL;
 struct VncSocket g_VncSock;
 int              g_VncState         = ST_IDLE;
-char             g_BufIn[65536];    /* Replaces DOS input buffer buffer */
+char*            g_BufIn            = NULL;    /* Replaces DOS input buffer buffer */
 
 FILE* fout = (FILE*)stderr;
 
@@ -46,19 +51,32 @@ int video_init(int width, int height) {
     g_ScreenWidth = width;
     g_ScreenHeight = height;
 
+    /* Allocate the input buffer dynamically based on screen resolution */
+    /* Assuming 8-bit color depth (1 byte per pixel). If using 16-bit, use (width * height * 2) */
+    g_BufIn = (char*)malloc(width * height);
+    if (!g_BufIn) {
+        return -1; /* Out of memory */
+    }
+
     memset(&bmi, 0, sizeof(BITMAPINFO));
     bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
     bmi.bmiHeader.biWidth       = width;
-    bmi.bmiHeader.biHeight      = -height; /* Negative indicates Top-Down rendering */
+    bmi.bmiHeader.biHeight      = -height; /* Top-Down rendering */
     bmi.bmiHeader.biPlanes      = 1;
-    bmi.bmiHeader.biBitCount    = 8;       /* 8-bit color mode mapped from DOS VGA */
+    bmi.bmiHeader.biBitCount    = 8;       
     bmi.bmiHeader.biCompression = BI_RGB;
 
     hdc = GetDC(NULL);
     g_hDIB = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, (void**)&g_pPixels, NULL, 0);
     ReleaseDC(NULL, hdc);
 
-    return (g_hDIB != NULL) ? 0 : -1;
+    if (!g_hDIB) {
+        free(g_BufIn);
+        g_BufIn = NULL;
+        return -1;
+    }
+
+    return 0;
 }
 
 void video_blk(int x, int y, int w, int h, long p, int s, char* buf_in) {
@@ -158,7 +176,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         case WM_DESTROY:
             sock_close(&g_VncSock);
+            /* Clean up our dynamic allocations */
             if (g_hDIB) DeleteObject(g_hDIB);
+            if (g_BufIn) {
+                free(g_BufIn);
+                g_BufIn = NULL;
+            }
             PostQuitMessage(0);
             break;
 
@@ -206,7 +229,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!auth_vnc(&g_VncSock, "password")) return 0;
     if (!init_vnc_client(&g_VncSock)) return 0;
     
-    video_init(640, 480);
+    video_init(fb_width, fb_height);
     request_vnc_refresh(&g_VncSock);
 
     /* 2. Cooperative PeekMessage Game-Style Loop Setup */
@@ -226,6 +249,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         /* --- THE ORIGINAL DOS MAIN LOOP LOGIC RUNS HERE --- */
         if (tcp_tick(&g_VncSock)) {
             if (sock_dataready(&g_VncSock)) {
+	fprintf(fout, "tick, g_VncState=%d\n",g_VncState),fflush(fout);
                 switch(g_VncState) {
                     case ST_IDLE: g_VncState = parse_vnc_msg(&g_VncSock); break;
                     case ST_RECT: g_VncState = parse_vnc_rect(&g_VncSock); break;
