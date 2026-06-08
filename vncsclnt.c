@@ -270,15 +270,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     WNDCLASS wc;
     MSG msg;
-    WSADATA wsaData;
+    BOOL bRunning = TRUE;
 
-    g_hInst = hInstance;
-
-    if (WSAStartup(MAKEWORD(1, 1), &wsaData) != 0) {
-        MessageBox(NULL, "Winsock Initialization Failed", "Error", MB_OK);
-        return 0;
-    }
-
+    /* ... Standard Window Registration & Creation Here ... */
     wc.style         = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc   = WndProc;
     wc.cbClsExtra    = 0;
@@ -297,15 +291,68 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                             650, 510, NULL, NULL, hInstance, NULL);
 
     if (!hWndMain) return 0;
-
     ShowWindow(hWndMain, nCmdShow);
     UpdateWindow(hWndMain);
 
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    /* 1. Run the blocking VNC Handshake Sequentially, exactly like DOS main() */
+    sock_init();
+    if (!socket_connect(&g_VncSock, DEF_HOST, DEF_PORT)) return 0;
+    if (!auth_vnc(&g_VncSock, "password")) return 0;
+    if (!init_vnc_client(&g_VncSock)) return 0;
+    
+    video_init(640, 480);
+    request_vnc_refresh(&g_VncSock);
+
+    /* 2. Cooperative PeekMessage Game-Style Loop Setup */
+    while (bRunning) {
+        /* Process all pending Windows messages first to keep the Win95 UI responsive */
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                bRunning = FALSE;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+        if (!bRunning) break;
+
+        /* --- THE ORIGINAL DOS MAIN LOOP LOGIC RUNS HERE --- */
+        if (tcp_tick(&g_VncSock)) {
+            if (sock_dataready(&g_VncSock)) {
+                switch(g_VncState) {
+                    case ST_IDLE: g_VncState = parse_vnc_msg(&g_VncSock); break;
+                    case ST_RECT: g_VncState = parse_vnc_rect(&g_VncSock); break;
+                    case ST_RAW:  
+                        g_VncState = parse_vnc_raw(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
+                        video_blk(x, y, w, h, p, s, g_BufIn);
+                        break;
+                    case ST_COPY:
+                        g_VncState = parse_vnc_copy(&g_VncSock, &x, &y, &w, &h, &srcx, &srcy);
+                        video_blt(x, y, w, h, srcx, srcy);
+                        break;
+                    case ST_RRE:  
+                        g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
+                        drawbar(x, y, w, h, video_pixcolor(g_BufIn));
+                        break;
+                }
+            } else {
+                /* Periodic refresh check fallback replacing countdown() */
+                static DWORD lastRefresh = 0;
+                DWORD now = GetTickCount(); /* Win32 millisecond counter */
+                if (now - lastRefresh > 220) {
+                    request_vnc_refresh(&g_VncSock);
+                    lastRefresh = now;
+                }
+            }
+
+            if (g_VncState == ST_ERROR) bRunning = FALSE;
+        } else {
+            bRunning = FALSE; /* Network socket disconnected */
+        }
     }
 
+    sock_close(&g_VncSock);
     WSACleanup();
     return msg.wParam;
 }
