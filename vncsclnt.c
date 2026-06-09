@@ -249,7 +249,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         /* --- THE ORIGINAL DOS MAIN LOOP LOGIC RUNS HERE --- */
         if (tcp_tick(&g_VncSock)) {
             if (sock_dataready(&g_VncSock)) {
-	fprintf(fout, "tick, g_VncState=%d\n",g_VncState),fflush(fout);
+	fprintf(fout, "tick, sock_dataready, g_VncState=%d\n",g_VncState),fflush(fout);
                 switch(g_VncState) {
                     case ST_IDLE: g_VncState = parse_vnc_msg(&g_VncSock); break;
                     case ST_RECT: g_VncState = parse_vnc_rect(&g_VncSock); break;
@@ -270,6 +270,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 /* Periodic refresh check fallback replacing countdown() */
                 static DWORD lastRefresh = 0;
                 DWORD now = GetTickCount(); /* Win32 millisecond counter */
+                if (!lastRefresh) lastRefresh = now;
+	fprintf(fout, "tick, !sock_dataready, timer=%d\n",now - lastRefresh),fflush(fout);
                 if (now - lastRefresh > 220) {
                     request_vnc_refresh(&g_VncSock);
                     lastRefresh = now;
@@ -278,6 +280,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
             if (g_VncState == ST_ERROR) bRunning = FALSE;
         } else {
+	fprintf(fout, "no tick\n"),fflush(fout);
             bRunning = FALSE; /* Network socket disconnected */
         }
     }

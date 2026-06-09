@@ -337,7 +337,7 @@ int parse_vnc_msg(struct VncSocket *fd)
 
 	default:
 		fprintf(fout, "msg: unknown: %d\n",rfb_msg.type),fflush(fout);
-		return ST_ERROR;
+		return ST_IDLE; // ignore it
 	}
 }
 
@@ -397,9 +397,11 @@ int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 {
 	int i;
 	*s = rfb_total-rfb_pos;
-		
+	fprintf(fout, "  enter parse_vnc_raw, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
+
 	i = sock_read(fd, buf, *s);
-	if (i != *s) return ST_ERROR;
+	fprintf(fout, "    enc_raw: sock_read returns %d\n", i),fflush(fout);
+	//if (i != *s) return ST_ERROR;
 
 	fprintf(fout, "    enc_raw: read %d, %ld of %ld bytes\n",*s,rfb_pos,rfb_total),fflush(fout);
 
@@ -425,6 +427,7 @@ int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 {
 	int i;
 	rfbCopyRect copyrect;
+	fprintf(fout, "  enter parse_vnc_copy\n"),fflush(fout);
 
 	i = sock_read(fd, (byte*)&copyrect, sz_rfbCopyRect);
 	fprintf(fout, " parse_vnc_copy: sock_read returns %d\n",1),fflush(fout);
@@ -448,6 +451,7 @@ int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 {
 	int i;
 	rfbRectangle subRect;
+	fprintf(fout, "  enter parse_vnc_rre\n"),fflush(fout);
 
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
 	if (i != sizeof(CARD8)) return ST_ERROR;
@@ -482,6 +486,7 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 {
 	int i;
 	rfbCoRRERectangle coRect;
+	fprintf(fout, "  enter parse_vnc_crre\n"),fflush(fout);
 
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
 	if (i != sizeof(CARD8)) return ST_ERROR;
