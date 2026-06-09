@@ -259,6 +259,9 @@ int auth_vnc(struct VncSocket *fd, char *passwd)
 		goto auth_out;
 
 	case rfbVncAuthOK:
+#ifdef DEBUG
+		fprintf(fout, "VncAuth: OK\n"),fflush(fout);
+#endif
 		return 1;
 	}
 }

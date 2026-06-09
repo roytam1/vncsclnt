@@ -36,6 +36,9 @@ struct VncSocket g_VncSock;
 int              g_VncState         = ST_IDLE;
 char*            g_BufIn            = NULL;    /* Replaces DOS input buffer buffer */
 
+int g_ScrollX = 0; /* Current horizontal scroll position */
+int g_ScrollY = 0; /* Current vertical scroll position */
+
 #ifdef DEBUG
 FILE* fout = (FILE*)stderr;
 #endif
@@ -90,39 +93,24 @@ int video_init(int width, int height) {
 }
 
 void video_blk(int x, int y, int w, int h, long p, int s, char* buf_in) {
-    int row, src_y_start;
-    HDC hdc;
+    int row;
+    RECT r;
 
-    /* 1. Invert rows while copying from Top-Down network stream to Bottom-Up memory */
+    /* 1. Update our persistent memory buffer (Bottom-Up layout transformation) */
     for (row = 0; row < h; row++) {
         int current_network_y = y + row;
-        
-        /* Convert standard top-down Y to Win32s bottom-up memory row index */
         int win32s_dib_row = g_ScreenHeight - 1 - current_network_y;
-        
-        /* Map row directly into our persistent surface */
         memcpy(&g_pPixels[win32s_dib_row * g_ScreenWidth + x], &buf_in[row * w], w);
     }
 
-    /* 2. Blit the dirty rectangle straight to the window DC immediately */
-    hdc = GetDC(hWndMain);
-    
-    /* Calculate where the top-left of our visual rect maps to the source DIB origin */
-    src_y_start = g_ScreenHeight - y - h;
+    /* 2. Convert raw VNC screen coordinates to current scrolled Client space */
+    r.left   = x - g_ScrollX;
+    r.top    = y - g_ScrollY;
+    r.right  = r.left + w;
+    r.bottom = r.top + h;
 
-    SetDIBitsToDevice(
-        hdc, 
-        x, y,             /* Destination top-left coordinates on screen window */
-        w, h,             /* Width and height of the updated dirty box */
-        x, src_y_start,   /* Source coordinates relative to the bottom-left of DIB */
-        0,                /* First scan line to start reading in lpBits */
-        g_ScreenHeight,   /* Total number of scan lines available in lpBits array */
-        g_pPixels,        /* Pointer to our raw memory array */
-        (BITMAPINFO*)&g_Bmi, 
-        DIB_RGB_COLORS
-    );
-
-    ReleaseDC(hWndMain, hdc);
+    /* 3. Tell Windows this exact box needs a repaint pass */
+    InvalidateRect(hWndMain, &r, FALSE);
 }
 
 void video_blt(int dest_x, int dest_y, int w, int h, int src_x, int src_y) {
@@ -167,18 +155,32 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             HDC hdc = BeginPaint(hwnd, &ps);
             /* Guard check: Only paint if our video buffer has been initialized */
             if (g_pPixels) {
-                /* Draw the entire frame buffer directly from raw RAM to the window */
-                SetDIBitsToDevice(
-                    hdc,
-                    0, 0,                           /* Destination top-left inside the window */
-                    g_ScreenWidth, g_ScreenHeight,   /* Width and height of the window area to paint */
-                    0, 0,                           /* Source X, Y (Start at the very beginning of our DIB memory) */
-                    0,                              /* First scan line to start reading */
-                    g_ScreenHeight,                 /* Total number of scan lines in the array */
-                    g_pPixels,                      /* Pointer to our raw memory frame buffer */
-                    (BITMAPINFO*)&g_Bmi,            /* Our global header containing the VNC palette */
-                    DIB_RGB_COLORS
-                );
+                /* Get coordinates of the dirty window window area that needs refreshing */
+                int dest_x = ps.rcPaint.left;
+                int dest_y = ps.rcPaint.top;
+                int dest_w = ps.rcPaint.right - ps.rcPaint.left;
+                int dest_h = ps.rcPaint.bottom - ps.rcPaint.top;
+
+                if (dest_w > 0 && dest_h > 0) {
+                    /* Map client window coordinates back into top-down VNC image coordinates */
+                    int vnc_x = dest_x + g_ScrollX;
+                    int vnc_y_bottom = dest_y + dest_h + g_ScrollY;
+
+                    /* Translate top-down VNC Y coordinate into our Bottom-Up DIB row array */
+                    int src_y = g_ScreenHeight - vnc_y_bottom;
+
+                    SetDIBitsToDevice(
+                        hdc,
+                        dest_x, dest_y,       /* Destination inside your window */
+                        dest_w, dest_h,       /* Update dimensions */
+                        vnc_x, src_y,         /* Source position inside g_pPixels */
+                        0,
+                        g_ScreenHeight,       /* Total available source scanlines */
+                        g_pPixels,
+                        (BITMAPINFO*)&g_Bmi,
+                        DIB_RGB_COLORS
+                    );
+                }
             }
             EndPaint(hwnd, &ps);
             break;
@@ -194,11 +196,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_MOUSEMOVE: {
-            int mx = LOWORD(lParam);
-            int my = HIWORD(lParam);
+            int mx = LOWORD(lParam) + g_ScrollX;
+            int my = HIWORD(lParam) + g_ScrollY;
             int buttons = 0;
             if (wParam & MK_LBUTTON) buttons |= 1;
+            if (wParam & MK_MBUTTON) buttons |= 2;
             if (wParam & MK_RBUTTON) buttons |= 4;
+
+            /* Clamp positions */
+            if (mx < 0) mx = 0;
+            if (mx >= g_ScreenWidth) mx = g_ScreenWidth - 1;
+            if (my < 0) my = 0;
+            if (my >= g_ScreenHeight) my = g_ScreenHeight - 1;
 
             send_vnc_pointer(&g_VncSock, mx, my, buttons);
             break;
@@ -206,13 +215,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
         case WM_RBUTTONDOWN:
         case WM_RBUTTONUP: {
-            int mx = LOWORD(lParam);
-            int my = HIWORD(lParam);
+            int mx = LOWORD(lParam) + g_ScrollX;
+            int my = HIWORD(lParam) + g_ScrollY;
             int buttons = 0;
             if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) buttons |= 1;
+            if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) buttons |= 2;
             if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) buttons |= 4;
+
+            /* Clamp positions */
+            if (mx < 0) mx = 0;
+            if (mx >= g_ScreenWidth) mx = g_ScreenWidth - 1;
+            if (my < 0) my = 0;
+            if (my >= g_ScreenHeight) my = g_ScreenHeight - 1;
 
             send_vnc_pointer(&g_VncSock, mx, my, buttons);
             request_vnc_refresh(&g_VncSock);
@@ -233,6 +251,90 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             
             PostQuitMessage(0);
             break;
+
+        case WM_SIZE:
+        {
+            int cx = LOWORD(lParam); /* Current window client width */
+            int cy = HIWORD(lParam); /* Current window client height */
+
+            /* Max scroll limit = Server Dimension - Window Dimension */
+            int max_x = (g_ScreenWidth > cx) ? (g_ScreenWidth - cx) : 0;
+            int max_y = (g_ScreenHeight > cy) ? (g_ScreenHeight - cy) : 0;
+
+            /* Configure scrollbar ranges (100% Win32s Safe) */
+            SetScrollRange(hwnd, SB_HORZ, 0, max_x, TRUE);
+            SetScrollRange(hwnd, SB_VERT, 0, max_y, TRUE);
+
+            /* Ensure current scroll tracking doesn't leave the new boundaries */
+            if (g_ScrollX > max_x) g_ScrollX = max_x;
+            if (g_ScrollY > max_y) g_ScrollY = max_y;
+
+            SetScrollPos(hwnd, SB_HORZ, g_ScrollX, TRUE);
+            SetScrollPos(hwnd, SB_VERT, g_ScrollY, TRUE);
+            break;
+        }
+
+        case WM_HSCROLL:
+        {
+            int action = LOWORD(wParam);
+            int pos    = HIWORD(wParam);
+            int cur_x  = g_ScrollX;
+            int max_x;
+
+            RECT r;
+            GetClientRect(hwnd, &r);
+            max_x = (g_ScreenWidth > r.right) ? (g_ScreenWidth - r.right) : 0;
+
+            switch (action) {
+                case SB_LINELEFT:      cur_x -= 10;  break;
+                case SB_LINERIGHT:     cur_x += 10;  break;
+                case SB_PAGELEFT:      cur_x -= 100; break;
+                case SB_PAGERIGHT:     cur_x += 100; break;
+                case SB_THUMBPOSITION:
+                case SB_THUMBTRACK:    cur_x = pos;  break;
+            }
+
+            if (cur_x < 0) cur_x = 0;
+            if (cur_x > max_x) cur_x = max_x;
+
+            if (cur_x != g_ScrollX) {
+                g_ScrollX = cur_x;
+                SetScrollPos(hwnd, SB_HORZ, g_ScrollX, TRUE);
+                InvalidateRect(hwnd, NULL, FALSE); /* Redraw screen with new offset */
+            }
+            break;
+        }
+
+        case WM_VSCROLL:
+        {
+            int action = LOWORD(wParam);
+            int pos    = HIWORD(wParam);
+            int cur_y  = g_ScrollY;
+            int max_y;
+
+            RECT r;
+            GetClientRect(hwnd, &r);
+            max_y = (g_ScreenHeight > r.bottom) ? (g_ScreenHeight - r.bottom) : 0;
+
+            switch (action) {
+                case SB_LINEUP:        cur_y -= 10;  break;
+                case SB_LINEDOWN:      cur_y += 10;  break;
+                case SB_PAGEUP:        cur_y -= 100; break;
+                case SB_PAGEDOWN:      cur_y += 100; break;
+                case SB_THUMBPOSITION:
+                case SB_THUMBTRACK:    cur_y = pos;  break;
+            }
+
+            if (cur_y < 0) cur_y = 0;
+            if (cur_y > max_y) cur_y = max_y;
+
+            if (cur_y != g_ScrollY) {
+                g_ScrollY = cur_y;
+                SetScrollPos(hwnd, SB_VERT, g_ScrollY, TRUE);
+                InvalidateRect(hwnd, NULL, FALSE); /* Redraw screen with new offset */
+            }
+            break;
+        }
 
         default:
             return DefWindowProc(hwnd, message, wParam, lParam);
@@ -301,30 +403,55 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszMenuName  = NULL;
-    wc.lpszClassName = "Win95VNCClass";
+    wc.lpszClassName = "W32sVNCClass";
 
     if (!RegisterClass(&wc)) return 0;
 
-    hWndMain = CreateWindow("Win95VNCClass", "Windows 95 Single-Threaded VNC",
-                            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                            650, 510, NULL, NULL, hInstance, NULL);
+    hWndMain = CreateWindow("W32sVNCClass", "Win32s VNC Client",
+        WS_OVERLAPPEDWINDOW | WS_HSCROLL | WS_VSCROLL, /* Enforce scrollbars */
+        CW_USEDEFAULT, CW_USEDEFAULT, 640, 480,
+        NULL, NULL, hInstance, NULL);
 
     /* 1. Run the blocking VNC Handshake Sequentially, exactly like DOS main() */
     sock_init();
 
+#ifdef DEBUG
+	fprintf(fout,"WinMain: socket_connect\n"),fflush(fout);
+#endif
     /* 2. User clicked OK! Initialize networking using our new dynamic variables */
     if (!socket_connect(&g_VncSock, g_VncIP, g_VncPort)) {
         MessageBox(NULL, "Failed to resolve host or connect to socket!", "Network Error", MB_ICONSTOP);
         return 0;
     }
 
+#ifdef DEBUG
+	fprintf(fout,"WinMain: auth_vnc\n"),fflush(fout);
+#endif
     if (!auth_vnc(&g_VncSock, g_VncPass)) {
         MessageBox(NULL, "Failed to authenticate!", "Authentication Error", MB_ICONSTOP);
         return 0;
     }
-    if (!init_vnc_client(&g_VncSock)) return 0;
-	if (!setup_vnc_pixelformat(&g_VncSock)) return 0;
-	if (!setup_vnc_encodings(&g_VncSock)) return 0;
+#ifdef DEBUG
+	fprintf(fout,"WinMain: init_vnc_client\n"),fflush(fout);
+#endif
+    if (!init_vnc_client(&g_VncSock)) {
+        MessageBox(NULL, "Failed to init VNC client!", "Error", MB_ICONSTOP);
+        return 0;
+    }
+#ifdef DEBUG
+	fprintf(fout,"WinMain: setup_vnc_pixelformat\n"),fflush(fout);
+#endif
+    if (!setup_vnc_pixelformat(&g_VncSock)) {
+        MessageBox(NULL, "Failed to setup VNC pixel format!", "Error", MB_ICONSTOP);
+        return 0;
+    }
+#ifdef DEBUG
+	fprintf(fout,"WinMain: setup_vnc_encodings\n"),fflush(fout);
+#endif
+    if (!setup_vnc_encodings(&g_VncSock)) {
+        MessageBox(NULL, "Failed to setup VNC encodings!", "Error", MB_ICONSTOP);
+        return 0;
+    }
 
     if (!hWndMain) return 0;
     ShowWindow(hWndMain, nCmdShow);
