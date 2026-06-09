@@ -23,13 +23,18 @@ rfbRREHeader rfb_rrehead;
 unsigned short rfb_rect;
 unsigned long rfb_pos,rfb_total;
 char server_name[256];
+BOOL isWin32s = 0;
 
 /* --- WATTCP Core Lifecycle Functions Translation --- */
 
 void sock_init(void) {
     WSADATA wsaData;
+    DWORD dwWinVer;
     /* Initialize Winsock 1.1 for Windows 95 */
     WSAStartup(MAKEWORD(1, 1), &wsaData);
+    dwWinVer = GetVersion();
+    isWin32s = (dwWinVer >= 0x80000000) && ((dwWinVer & 0xFF) == 3);
+		fprintf(fout,"sock_init: dwWinVer=%08x, isWin32s=%d\n",dwWinVer,isWin32s),fflush(fout);
 }
 
 int socket_connect(struct VncSocket* s, char* host, int port) {
@@ -96,10 +101,12 @@ int sock_read(struct VncSocket* s, char* buffer, int len) {
     int total_read = 0;
     int bytes_left = len;
     int n;
+    int read_bytes;
 
     while (total_read < len) {
+        read_bytes = bytes_left > 32767 ? (isWin32s ? 32767 : bytes_left) : bytes_left;
         /* Ask recv to fill whatever is remaining in our requested length */
-        n = recv(s->sock, buffer + total_read, bytes_left, 0);
+        n = recv(s->sock, buffer + total_read, read_bytes, 0);
 
         if (n == 0) {
             /* Connection was gracefully closed by the server */

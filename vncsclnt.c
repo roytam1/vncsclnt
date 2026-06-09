@@ -37,71 +37,88 @@ char*            g_BufIn            = NULL;    /* Replaces DOS input buffer buff
 FILE* fout = (FILE*)stderr;
 
 /* GDI Screen Buffering */
-HBITMAP          g_hDIB             = NULL;
 BYTE* g_pPixels          = NULL;
+BITMAPINFO_8BPP g_Bmi;             /* Persistent layout and palette configuration */
 int              g_ScreenWidth      = 800;   /* Will update dynamically if known */
 int              g_ScreenHeight     = 600;
 
 /* --- Win32/GDI Implementation of Missing video.c Functions --- */
 int video_init(int width, int height) {
-    HDC hdc;
-    BITMAPINFO_8BPP bmi;  /* Use our custom struct! */
     int i;
 
     g_ScreenWidth = width;
     g_ScreenHeight = height;
 
-    /* 1. Dynamically allocate the incoming raw network buffer */
+    /* 1. Allocate the VNC network stream buffer */
     g_BufIn = (char*)malloc(width * height);
     if (!g_BufIn) return -1;
 
-    /* 2. Setup the DIB Header */
-    memset(&bmi, 0, sizeof(BITMAPINFO_8BPP));
-    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth       = width;
-    bmi.bmiHeader.biHeight      = -height; /* Top-Down rendering */
-    bmi.bmiHeader.biPlanes      = 1;
-    bmi.bmiHeader.biBitCount    = 8;       /* 8-bit Indexed Color */
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    /* 3. Generate the 256-Color VNC Palette (Assuming BGR233 format) */
-    for (i = 0; i < 256; i++) {
-        /* Extract the bits based on BGR233 */
-        int r = (i & 0x07);        /* Bottom 3 bits (0-7) */
-        int g = ((i >> 3) & 0x07); /* Middle 3 bits (0-7) */
-        int b = ((i >> 6) & 0x03); /* Top 2 bits    (0-3) */
-
-        /* Scale them up to standard 0-255 RGB values */
-        /* 255 / 7 = 36.4, 255 / 3 = 85 */
-        bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 7);
-        bmi.bmiColors[i].rgbGreen = (BYTE)(g * 255 / 7);
-        bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 3);
-        bmi.bmiColors[i].rgbReserved = 0;
-    }
-
-    /* 4. Create the DIB Section using our custom header + palette */
-    hdc = GetDC(NULL);
-    /* Note the cast to (BITMAPINFO*) below */
-    g_hDIB = CreateDIBSection(hdc, (BITMAPINFO*)&bmi, DIB_RGB_COLORS, (void**)&g_pPixels, NULL, 0);
-    ReleaseDC(NULL, hdc);
-
-    if (!g_hDIB) {
+    /* 2. Allocate our local persistent screen surface memory */
+    g_pPixels = (char*)malloc(width * height);
+    if (!g_pPixels) {
         free(g_BufIn);
-        g_BufIn = NULL;
         return -1;
+    }
+    memset(g_pPixels, 0, width * height);
+
+    /* 3. Setup the DIB Header (CRITICAL: biHeight MUST be positive for Win32s) */
+    memset(&g_Bmi, 0, sizeof(BITMAPINFO_8BPP));
+    g_Bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    g_Bmi.bmiHeader.biWidth       = width;
+    g_Bmi.bmiHeader.biHeight      = height; /* Positive = Bottom-Up layout */
+    g_Bmi.bmiHeader.biPlanes      = 1;
+    g_Bmi.bmiHeader.biBitCount    = 8;       
+    g_Bmi.bmiHeader.biCompression = BI_RGB;
+
+    /* 4. Generate the BGR233 Palette */
+    for (i = 0; i < 256; i++) {
+        int r = (i & 0x07);
+        int g = ((i >> 3) & 0x07);
+        int b = ((i >> 6) & 0x03);
+
+        g_Bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 7);
+        g_Bmi.bmiColors[i].rgbGreen = (BYTE)(g * 255 / 7);
+        g_Bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 3);
+        g_Bmi.bmiColors[i].rgbReserved = 0;
     }
 
     return 0;
 }
 
 void video_blk(int x, int y, int w, int h, long p, int s, char* buf_in) {
-    int row;
-    RECT rect;
+    int row, src_y_start;
+    HDC hdc;
+
+    /* 1. Invert rows while copying from Top-Down network stream to Bottom-Up memory */
     for (row = 0; row < h; row++) {
-        memcpy(&g_pPixels[(y + row) * g_ScreenWidth + x], &buf_in[row * w], w);
+        int current_network_y = y + row;
+        
+        /* Convert standard top-down Y to Win32s bottom-up memory row index */
+        int win32s_dib_row = g_ScreenHeight - 1 - current_network_y;
+        
+        /* Map row directly into our persistent surface */
+        memcpy(&g_pPixels[win32s_dib_row * g_ScreenWidth + x], &buf_in[row * w], w);
     }
-    SetRect(&rect, x, y, x + w, y + h);
-    InvalidateRect(hWndMain, &rect, FALSE);
+
+    /* 2. Blit the dirty rectangle straight to the window DC immediately */
+    hdc = GetDC(hWndMain);
+    
+    /* Calculate where the top-left of our visual rect maps to the source DIB origin */
+    src_y_start = g_ScreenHeight - y - h;
+
+    SetDIBitsToDevice(
+        hdc, 
+        x, y,             /* Destination top-left coordinates on screen window */
+        w, h,             /* Width and height of the updated dirty box */
+        x, src_y_start,   /* Source coordinates relative to the bottom-left of DIB */
+        0,                /* First scan line to start reading in lpBits */
+        g_ScreenHeight,   /* Total number of scan lines available in lpBits array */
+        g_pPixels,        /* Pointer to our raw memory array */
+        (BITMAPINFO*)&g_Bmi, 
+        DIB_RGB_COLORS
+    );
+
+    ReleaseDC(hWndMain, hdc);
 }
 
 void video_blt(int dest_x, int dest_y, int w, int h, int src_x, int src_y) {
@@ -144,11 +161,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
-            if (g_hDIB) {
-                HDC hdcMem = CreateCompatibleDC(hdc);
-                SelectObject(hdcMem, g_hDIB);
-                BitBlt(hdc, 0, 0, g_ScreenWidth, g_ScreenHeight, hdcMem, 0, 0, SRCCOPY);
-                DeleteDC(hdcMem);
+            /* Guard check: Only paint if our video buffer has been initialized */
+            if (g_pPixels) {
+                /* Draw the entire frame buffer directly from raw RAM to the window */
+                SetDIBitsToDevice(
+                    hdc,
+                    0, 0,                           /* Destination top-left inside the window */
+                    g_ScreenWidth, g_ScreenHeight,   /* Width and height of the window area to paint */
+                    0, 0,                           /* Source X, Y (Start at the very beginning of our DIB memory) */
+                    0,                              /* First scan line to start reading */
+                    g_ScreenHeight,                 /* Total number of scan lines in the array */
+                    g_pPixels,                      /* Pointer to our raw memory frame buffer */
+                    (BITMAPINFO*)&g_Bmi,            /* Our global header containing the VNC palette */
+                    DIB_RGB_COLORS
+                );
             }
             EndPaint(hwnd, &ps);
             break;
@@ -191,12 +217,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         case WM_DESTROY:
             sock_close(&g_VncSock);
-            /* Clean up our dynamic allocations */
-            if (g_hDIB) DeleteObject(g_hDIB);
+            
             if (g_BufIn) {
                 free(g_BufIn);
                 g_BufIn = NULL;
             }
+            if (g_pPixels) {
+                free(g_pPixels);
+                g_pPixels = NULL;
+            }
+            
             PostQuitMessage(0);
             break;
 
