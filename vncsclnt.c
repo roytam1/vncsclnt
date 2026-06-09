@@ -46,12 +46,14 @@ FILE* fout = (FILE*)stderr;
 /* GDI Screen Buffering */
 BYTE* g_pPixels          = NULL;
 BITMAPINFO_8BPP g_Bmi;             /* Persistent layout and palette configuration */
+HPALETTE g_hPalette = NULL;        /* Global GDI Palette handle */
 int              g_ScreenWidth      = 800;   /* Will update dynamically if known */
 int              g_ScreenHeight     = 600;
 
 /* --- Win32/GDI Implementation of Missing video.c Functions --- */
 int video_init(int width, int height) {
     int i;
+    LOGPALETTE* pLogPal;
 
     g_ScreenWidth = width;
     g_ScreenHeight = height;
@@ -68,6 +70,13 @@ int video_init(int width, int height) {
     }
     memset(g_pPixels, 0, width * height);
 
+    pLogPal = (LOGPALETTE*)malloc(sizeof(LOGPALETTE) + (256 * sizeof(PALETTEENTRY)));
+    if (!pLogPal) {
+        free(g_pPixels);
+        free(g_BufIn);
+        return -1;
+    }
+
     /* 3. Setup the DIB Header (CRITICAL: biHeight MUST be positive for Win32s) */
     memset(&g_Bmi, 0, sizeof(BITMAPINFO_8BPP));
     g_Bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
@@ -77,17 +86,20 @@ int video_init(int width, int height) {
     g_Bmi.bmiHeader.biBitCount    = 8;       
     g_Bmi.bmiHeader.biCompression = BI_RGB;
 
-    /* 4. Generate the BGR233 Palette */
+    /* 4. Generate the BGR332 Palette */
     for (i = 0; i < 256; i++) {
         int r = (i & 0x03);
         int g = ((i >> 2) & 0x07);
         int b = ((i >> 5) & 0x07);
 
-        g_Bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 3);
-        g_Bmi.bmiColors[i].rgbGreen = (BYTE)(g * 255 / 7);
-        g_Bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 7);
-        g_Bmi.bmiColors[i].rgbReserved = 0;
+        pLogPal->palPalEntry[i].peRed   = g_Bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 3);
+        pLogPal->palPalEntry[i].peGreen = g_Bmi.bmiColors[i].rgbGreen = (BYTE)(g * 255 / 7);
+        pLogPal->palPalEntry[i].peBlue  = g_Bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 7);
+        pLogPal->palPalEntry[i].peFlags = g_Bmi.bmiColors[i].rgbReserved = 0;
     }
+
+    g_hPalette = CreatePalette(pLogPal);
+    free(pLogPal);
 
     return 0;
 }
@@ -150,16 +162,61 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     switch (message) {
 
+        case WM_QUERYNEWPALETTE:
+            if (g_hPalette) {
+                HDC hdc = GetDC(hwnd);
+                HPALETTE hOldPal = SelectPalette(hdc, g_hPalette, FALSE);
+
+                /* RealizePalette returns the number of colors changed in system mapping */
+                UINT realized = RealizePalette(hdc);
+
+                SelectPalette(hdc, hOldPal, FALSE);
+                ReleaseDC(hwnd, hdc);
+
+                if (realized > 0) {
+                    /* If colors shifted, redraw the entire client window immediately */
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    return TRUE;
+                }
+            }
+            return FALSE;
+
+        case WM_PALETTECHANGED:
+            /* Only respond if another application caused the palette shift */
+            if (g_hPalette && (HWND)wParam != hwnd) {
+                HDC hdc = GetDC(hwnd);
+
+                /* Select as a background palette (TRUE) so we don't fight foreground apps */
+                HPALETTE hOldPal = SelectPalette(hdc, g_hPalette, TRUE);
+                UINT realized = RealizePalette(hdc);
+
+                SelectPalette(hdc, hOldPal, FALSE);
+                ReleaseDC(hwnd, hdc);
+
+                if (realized > 0) {
+                    InvalidateRect(hwnd, NULL, FALSE);
+                }
+            }
+            return 0;
+
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
             /* Guard check: Only paint if our video buffer has been initialized */
             if (g_pPixels) {
+                HPALETTE hOldPal = NULL;
+
                 /* Get coordinates of the dirty window window area that needs refreshing */
                 int dest_x = ps.rcPaint.left;
                 int dest_y = ps.rcPaint.top;
                 int dest_w = ps.rcPaint.right - ps.rcPaint.left;
                 int dest_h = ps.rcPaint.bottom - ps.rcPaint.top;
+
+                /* If running on a 256-color display, force our palette choices */
+                if (g_hPalette) {
+                    hOldPal = SelectPalette(hdc, g_hPalette, FALSE);
+                    RealizePalette(hdc);
+                }
 
                 if (dest_w > 0 && dest_h > 0) {
                     /* Map client window coordinates back into top-down VNC image coordinates */
@@ -180,6 +237,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                         (BITMAPINFO*)&g_Bmi,
                         DIB_RGB_COLORS
                     );
+                }
+
+                /* Restore old system palette state */
+                if (g_hPalette) {
+                    SelectPalette(hdc, hOldPal, FALSE);
                 }
             }
             EndPaint(hwnd, &ps);
@@ -240,6 +302,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         case WM_DESTROY:
             sock_close(&g_VncSock);
             
+            if (g_hPalette) {
+                DeleteObject(g_hPalette);
+                g_hPalette = NULL;
+            }
             if (g_BufIn) {
                 free(g_BufIn);
                 g_BufIn = NULL;
