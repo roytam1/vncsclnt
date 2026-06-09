@@ -5,13 +5,7 @@
 #include <stdio.h>
 
 /* --- VNC Protocol States (from original DOS client) --- */
-#define ST_IDLE   0
-#define ST_RECT   1
-#define ST_RAW    2
-#define ST_COPY   3
-#define ST_RRE    4
-#define ST_CRRE   5
-#define ST_ERROR  -1
+#include "vnc.h"
 
 /* --- Default configuration --- */
 #define DEF_PORT  5900
@@ -251,21 +245,36 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             if (sock_dataready(&g_VncSock)) {
 	fprintf(fout, "tick, sock_dataready, g_VncState=%d\n",g_VncState),fflush(fout);
                 switch(g_VncState) {
-                    case ST_IDLE: g_VncState = parse_vnc_msg(&g_VncSock); break;
-                    case ST_RECT: g_VncState = parse_vnc_rect(&g_VncSock); break;
-                    case ST_RAW:  
+                    case ST_IDLE:
+	fprintf(fout, " ST_IDLE\n"),fflush(fout);
+                        g_VncState = parse_vnc_msg(&g_VncSock);
+                        break;
+                    case ST_RECT:
+	fprintf(fout, " ST_RECT\n"),fflush(fout);
+                        g_VncState = parse_vnc_rect(&g_VncSock);
+                        break;
+                    case ST_RAW:
+	fprintf(fout, " ST_RAW\n"),fflush(fout);
                         g_VncState = parse_vnc_raw(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
                         video_blk(x, y, w, h, p, s, g_BufIn);
                         break;
                     case ST_COPY:
+	fprintf(fout, " ST_COPY\n"),fflush(fout);
                         g_VncState = parse_vnc_copy(&g_VncSock, &x, &y, &w, &h, &srcx, &srcy);
                         video_blt(x, y, w, h, srcx, srcy);
                         break;
                     case ST_RRE:  
+	fprintf(fout, " ST_RRE\n"),fflush(fout);
                         g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, g_BufIn);
+                        drawbar(x, y, w, h, *g_BufIn);
+                        break;
+                    case ST_CRRE:  
+	fprintf(fout, " ST_CRRE\n"),fflush(fout);
+                        g_VncState = parse_vnc_crre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
+                        drawbar(x, y, w, h, *g_BufIn);
                         break;
                 }
+	fprintf(fout, " new g_VncState=%d\n",g_VncState),fflush(fout);
             } else {
                 /* Periodic refresh check fallback replacing countdown() */
                 static DWORD lastRefresh = 0;

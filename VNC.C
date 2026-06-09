@@ -332,10 +332,12 @@ int parse_vnc_msg(struct VncSocket *fd)
 	int i;
 	CARD32 i32;
 	CARD8 x;
+	fprintf(fout, "  enter parse_vnc_msg\n"),fflush(fout);
 
 	i = sock_read (fd, (byte*)&rfb_msg, sizeof(CARD8));
 	if (i != sizeof(CARD8)) return ST_ERROR;
 
+	fprintf(fout, "    rfb_msg.type=%d\n",rfb_msg.type),fflush(fout);
 	switch (rfb_msg.type) {
 	case rfbFramebufferUpdate:
 		i = sock_read(fd, ((byte*)&rfb_msg)+sizeof(CARD8), sz_rfbFramebufferUpdateMsg - sizeof(CARD8));
@@ -368,6 +370,7 @@ int parse_vnc_msg(struct VncSocket *fd)
 int parse_vnc_rect(struct VncSocket *fd)
 {
 	int i;
+	fprintf(fout, "  enter parse_vnc_raw, rfb_rect=%d, rfb_msg.fu.nRects=%d\n",rfb_rect,rfb_msg.fu.nRects),fflush(fout);
 	if (rfb_rect >= rfb_msg.fu.nRects) return ST_IDLE;
 
 	i = sock_read(fd, (byte*)&rfb_uprect, sz_rfbFramebufferUpdateRectHeader);
@@ -390,6 +393,7 @@ int parse_vnc_rect(struct VncSocket *fd)
 
 	rfb_pos=0;
 
+	fprintf(fout, "  rfb_uprect.encoding=%d\n",rfb_uprect.encoding),fflush(fout);
 	switch(rfb_uprect.encoding) {
 	case rfbEncodingRaw:
 		rfb_total=(CARD32)rfb_uprect.r.w * (CARD32)rfb_uprect.r.h;
