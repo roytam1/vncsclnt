@@ -36,7 +36,9 @@ struct VncSocket g_VncSock;
 int              g_VncState         = ST_IDLE;
 char*            g_BufIn            = NULL;    /* Replaces DOS input buffer buffer */
 
+#ifdef DEBUG
 FILE* fout = (FILE*)stderr;
+#endif
 
 /* GDI Screen Buffering */
 BYTE* g_pPixels          = NULL;
@@ -277,7 +279,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int x, y, w, h, s, srcx, srcy;
     long p;
 
+#ifdef DEBUG
     fout = fopen("vncsclnt.log", "w");
+#endif
 
     /* 1. Launch connection window first */
     result = DialogBox(hInstance, MAKEINTRESOURCE(IDD_CONNECT_DLG), NULL, (DLGPROC)ConnectDlgProc);
@@ -346,45 +350,63 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         /* --- THE ORIGINAL DOS MAIN LOOP LOGIC RUNS HERE --- */
         if (tcp_tick(&g_VncSock)) {
             if (sock_dataready(&g_VncSock)) {
+#ifdef DEBUG
 	fprintf(fout, "tick, sock_dataready, g_VncState=%d\n",g_VncState),fflush(fout);
+#endif
                 switch(g_VncState) {
                     case ST_IDLE:
+#ifdef DEBUG
 	fprintf(fout, " ST_IDLE\n"),fflush(fout);
+#endif
                         g_VncState = parse_vnc_msg(&g_VncSock);
                         break;
                     case ST_RECT:
+#ifdef DEBUG
 	fprintf(fout, " ST_RECT\n"),fflush(fout);
+#endif
                         g_VncState = parse_vnc_rect(&g_VncSock);
                         break;
                     case ST_RAW:
+#ifdef DEBUG
 	fprintf(fout, " ST_RAW\n"),fflush(fout);
+#endif
                         g_VncState = parse_vnc_raw(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
                         video_blk(x, y, w, h, p, s, g_BufIn);
                         break;
                     case ST_COPY:
+#ifdef DEBUG
 	fprintf(fout, " ST_COPY\n"),fflush(fout);
+#endif
                         g_VncState = parse_vnc_copy(&g_VncSock, &x, &y, &w, &h, &srcx, &srcy);
                         video_blt(x, y, w, h, srcx, srcy);
                         break;
                     case ST_RRE:  
+#ifdef DEBUG
 	fprintf(fout, " ST_RRE\n"),fflush(fout);
+#endif
                         g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
                         drawbar(x, y, w, h, *g_BufIn);
                         break;
                     case ST_CRRE:  
+#ifdef DEBUG
 	fprintf(fout, " ST_CRRE\n"),fflush(fout);
+#endif
                         g_VncState = parse_vnc_crre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
                         drawbar(x, y, w, h, *g_BufIn);
                         break;
                 }
+#ifdef DEBUG
 	fprintf(fout, " new g_VncState=%d\n",g_VncState),fflush(fout);
+#endif
             } else {
                 /* Periodic refresh check fallback replacing countdown() */
                 static DWORD lastRefresh = 0;
                 DWORD now = GetTickCount(); /* Win32 millisecond counter */
                 if (!lastRefresh) lastRefresh = now;
                 if (now - lastRefresh > 220) {
+#ifdef DEBUG
 	fprintf(fout, "tick, !sock_dataready, timer=%d\n",now - lastRefresh),fflush(fout);
+#endif
                     request_vnc_refresh(&g_VncSock);
                     lastRefresh = now;
                 }
@@ -392,7 +414,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
             if (g_VncState == ST_ERROR) bRunning = FALSE;
         } else {
+#ifdef DEBUG
 	fprintf(fout, "no tick\n"),fflush(fout);
+#endif
             bRunning = FALSE; /* Network socket disconnected */
         }
     }
