@@ -22,6 +22,7 @@ rfbFramebufferUpdateRectHeader rfb_uprect;
 rfbRREHeader rfb_rrehead;
 unsigned short rfb_rect;
 unsigned long rfb_pos,rfb_total;
+char server_name[256];
 
 /* --- WATTCP Core Lifecycle Functions Translation --- */
 
@@ -249,7 +250,7 @@ int init_vnc_client(struct VncSocket *fd)
 
 	i32 = ntohl(serverinit.nameLength);
 	for (i=0; i<i32; i++)
-		sock_read(fd, (byte*)&x, 1);
+		sock_read(fd, i < 256 ? server_name+i : (byte*)&x, 1);
 
 	return 1;
 }
