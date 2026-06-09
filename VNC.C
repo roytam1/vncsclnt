@@ -616,22 +616,22 @@ int send_vnc_key(struct VncSocket *fd, int kbd)
 	CARD16 k = 0;
 
 	switch(kbd) {
-		case '\x08': k = 0xFF08; break; // bksp
-		case '\x09': k = 0xFF09; break; // tab
-		case '\x1b': k = 0xFF1b; break; // esc
-		case 0x14b: k = 0xFF51; break; // left
-		case 0x148: k = 0xFF52; break; // up
-		case 0x14d: k = 0xFF53; break; // right
-		case 0x150: k = 0xFF54; break; // down
-		case 0x152: k = 0xFF63; break; // ins
-		case 0x153: k = 0xFFFF; break; // del
-		case 0x147: k = 0xFF50; break; // home
-		case 0x14f: k = 0xFF57; break; // end
-		case 0x149: k = 0xFF55; break; // pg-up
-		case 0x151: k = 0xFF56; break; // pg-down
+		case VK_BACK  : k = 0xFF08; break; // bksp
+		case VK_TAB   : k = 0xFF09; break; // tab
+		case VK_ESCAPE: k = 0xFF1b; break; // esc
+		case VK_LEFT  : k = 0xFF51; break; // left
+		case VK_UP    : k = 0xFF52; break; // up
+		case VK_RIGHT : k = 0xFF53; break; // right
+		case VK_DOWN  : k = 0xFF54; break; // down
+		case VK_INSERT: k = 0xFF63; break; // ins
+		case VK_DELETE: k = 0xFFFF; break; // del
+		case VK_HOME  : k = 0xFF50; break; // home
+		case VK_END   : k = 0xFF57; break; // end
+		case VK_PRIOR : k = 0xFF55; break; // pg-up
+		case VK_NEXT  : k = 0xFF56; break; // pg-down
 		default:
-			if (kbd >= 0x13b && kbd <=0x144) { // F1..F10
-				k = 0xFFBE + (kbd-0x13b);
+			if (kbd >= VK_F1 && kbd <=VK_F12) { // F1..F12
+				k = 0xFFBE + (kbd-VK_F1);
 			} else if (kbd < 0x100) k = kbd;
 				else k=0;
 			break;
