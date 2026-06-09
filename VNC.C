@@ -90,9 +90,32 @@ void sock_close(struct VncSocket* s) {
 }
 
 /* Replaces WATTCP block reads */
+/* Upgraded sock_read: Guarantees ALL requested bytes are read before returning */
 int sock_read(struct VncSocket* s, char* buffer, int len) {
-    /* Because the socket remains blocking, this will behave exactly like DOS */
-    return recv(s->sock, buffer, len, 0);
+    int total_read = 0;
+    int bytes_left = len;
+    int n;
+
+    while (total_read < len) {
+        /* Ask recv to fill whatever is remaining in our requested length */
+        n = recv(s->sock, buffer + total_read, bytes_left, 0);
+
+        if (n == 0) {
+            /* Connection was gracefully closed by the server */
+            return (total_read > 0) ? total_read : 0;
+        } 
+        else if (n == SOCKET_ERROR) {
+            /* A network error occurred */
+            return (total_read > 0) ? total_read : -1;
+        }
+
+        /* Shift our tracking variables forward by the amount we just received */
+        total_read += n;
+        bytes_left -= n;
+    }
+
+    /* We successfully grabbed every single byte the parser asked for! */
+    return total_read;
 }
 
 /* Replaces WATTCP block writes */
