@@ -4,13 +4,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "resource.h"
+
 /* --- VNC Protocol States (from original DOS client) --- */
 #include "vnc.h"
 
 /* --- Default configuration --- */
-#define DEF_PORT  5900
-#define DEF_HOST  "192.168.1.50"
-#define WM_VNC_SOCKET_EVENT (WM_USER + 1)
+char g_VncIP[64]   = "192.168.1.100"; /* Provide default values */
+int  g_VncPort     = 5900;
+char g_VncPass[10] = "";
 
 /* --- External VNC Library Functions (Assumed from your repo) --- */
 #include "vnc.h"
@@ -236,15 +238,54 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
     return 0;
 }
 
+/* Dialog Procedure for handling user input */
+BOOL CALLBACK ConnectDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+        case WM_INITDIALOG:
+            /* Pre-populate fields with our default globals */
+            SetDlgItemText(hDlg, IDC_IP_EDIT, g_VncIP);
+            SetDlgItemInt(hDlg, IDC_PORT_EDIT, g_VncPort, FALSE);
+            SetDlgItemText(hDlg, IDC_PASS_EDIT, g_VncPass);
+            return TRUE;
+
+        case WM_COMMAND:
+            switch (LOWORD(wParam)) {
+                case IDOK:
+                    /* Extract user inputs directly into globals when OK is pressed */
+                    GetDlgItemText(hDlg, IDC_IP_EDIT, g_VncIP, sizeof(g_VncIP));
+                    g_VncPort = GetDlgItemInt(hDlg, IDC_PORT_EDIT, NULL, FALSE);
+                    GetDlgItemText(hDlg, IDC_PASS_EDIT, g_VncPass, sizeof(g_VncPass));
+                    
+                    EndDialog(hDlg, IDOK);
+                    return TRUE;
+
+                case IDCANCEL:
+                    EndDialog(hDlg, IDCANCEL);
+                    return TRUE;
+            }
+            break;
+    }
+    return FALSE;
+}
+
 /* --- WinMain Application Entry Point --- */
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     WNDCLASS wc;
     MSG msg;
     BOOL bRunning = TRUE;
+    DWORD result;
     int x, y, w, h, s, srcx, srcy;
     long p;
 
     fout = fopen("vncsclnt.log", "w");
+
+    /* 1. Launch connection window first */
+    result = DialogBox(hInstance, MAKEINTRESOURCE(IDD_CONNECT_DLG), NULL, (DLGPROC)ConnectDlgProc);
+    
+    /* If user pressed cancel or closed the dialog window, stop app execution */
+    if (result != IDOK) {
+        return 0; 
+    }
 
     /* ... Standard Window Registration & Creation Here ... */
     wc.style         = CS_HREDRAW | CS_VREDRAW;
@@ -264,17 +305,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                             650, 510, NULL, NULL, hInstance, NULL);
 
-    if (!hWndMain) return 0;
-    ShowWindow(hWndMain, nCmdShow);
-    UpdateWindow(hWndMain);
-
     /* 1. Run the blocking VNC Handshake Sequentially, exactly like DOS main() */
     sock_init();
-    if (!socket_connect(&g_VncSock, DEF_HOST, DEF_PORT)) return 0;
-    if (!auth_vnc(&g_VncSock, "password")) return 0;
+
+    /* 2. User clicked OK! Initialize networking using our new dynamic variables */
+    if (!socket_connect(&g_VncSock, g_VncIP, g_VncPort)) {
+        MessageBox(NULL, "Failed to resolve host or connect to socket!", "Network Error", MB_ICONSTOP);
+        return 0;
+    }
+
+    if (!auth_vnc(&g_VncSock, g_VncPass)) {
+        MessageBox(NULL, "Failed to authenticate!", "Authentication Error", MB_ICONSTOP);
+        return 0;
+    }
     if (!init_vnc_client(&g_VncSock)) return 0;
 	if (!setup_vnc_pixelformat(&g_VncSock)) return 0;
 	if (!setup_vnc_encodings(&g_VncSock)) return 0;
+
+    if (!hWndMain) return 0;
+    ShowWindow(hWndMain, nCmdShow);
+    UpdateWindow(hWndMain);
 
     video_init(fb_width, fb_height);
     request_vnc_refresh(&g_VncSock);

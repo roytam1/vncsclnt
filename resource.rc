@@ -1,0 +1,20 @@
+#include <windows.h>
+#include "resource.h"
+
+IDD_CONNECT_DLG DIALOG DISCARDABLE  32, 32, 180, 110
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Connect to VNC Server"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "Server IP:", IDC_STATIC, 10, 15, 40, 10
+    EDITTEXT        IDC_IP_EDIT, 55, 12, 115, 12, ES_AUTOHSCROLL
+
+    LTEXT           "Port:", IDC_STATIC, 10, 35, 40, 10
+    EDITTEXT        IDC_PORT_EDIT, 55, 32, 45, 12, ES_NUMBER | ES_AUTOHSCROLL
+
+    LTEXT           "Password:", IDC_STATIC, 10, 55, 40, 10
+    EDITTEXT        IDC_PASS_EDIT, 55, 52, 115, 12, ES_PASSWORD | ES_AUTOHSCROLL
+
+    DEFPUSHBUTTON   "OK", IDOK, 35, 85, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 95, 85, 50, 14
+END
