@@ -13,13 +13,18 @@
 #define WM_VNC_SOCKET_EVENT (WM_USER + 1)
 
 /* --- External VNC Library Functions (Assumed from your repo) --- */
-/* You may need to change 'struct VncSocket' to match your actual structure name */
-
 #include "vnc.h"
 
+extern char server_name[256];
 /* VNC.C screen size from VNC server */
 extern unsigned short fb_width;
 extern unsigned short fb_height;
+
+/* Custom struct to hold the header AND the 256 color palette table */
+typedef struct {
+    BITMAPINFOHEADER bmiHeader;
+    RGBQUAD          bmiColors[256];
+} BITMAPINFO_8BPP;
 
 
 /* --- Global Variables --- */
@@ -40,28 +45,44 @@ int              g_ScreenHeight     = 600;
 /* --- Win32/GDI Implementation of Missing video.c Functions --- */
 int video_init(int width, int height) {
     HDC hdc;
-    BITMAPINFO bmi;
+    BITMAPINFO_8BPP bmi;  /* Use our custom struct! */
+    int i;
 
     g_ScreenWidth = width;
     g_ScreenHeight = height;
 
-    /* Allocate the input buffer dynamically based on screen resolution */
-    /* Assuming 8-bit color depth (1 byte per pixel). If using 16-bit, use (width * height * 2) */
+    /* 1. Dynamically allocate the incoming raw network buffer */
     g_BufIn = (char*)malloc(width * height);
-    if (!g_BufIn) {
-        return -1; /* Out of memory */
-    }
+    if (!g_BufIn) return -1;
 
-    memset(&bmi, 0, sizeof(BITMAPINFO));
+    /* 2. Setup the DIB Header */
+    memset(&bmi, 0, sizeof(BITMAPINFO_8BPP));
     bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
     bmi.bmiHeader.biWidth       = width;
     bmi.bmiHeader.biHeight      = -height; /* Top-Down rendering */
     bmi.bmiHeader.biPlanes      = 1;
-    bmi.bmiHeader.biBitCount    = 8;       
+    bmi.bmiHeader.biBitCount    = 8;       /* 8-bit Indexed Color */
     bmi.bmiHeader.biCompression = BI_RGB;
 
+    /* 3. Generate the 256-Color VNC Palette (Assuming BGR233 format) */
+    for (i = 0; i < 256; i++) {
+        /* Extract the bits based on BGR233 */
+        int r = (i & 0x07);        /* Bottom 3 bits (0-7) */
+        int g = ((i >> 3) & 0x07); /* Middle 3 bits (0-7) */
+        int b = ((i >> 6) & 0x03); /* Top 2 bits    (0-3) */
+
+        /* Scale them up to standard 0-255 RGB values */
+        /* 255 / 7 = 36.4, 255 / 3 = 85 */
+        bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 7);
+        bmi.bmiColors[i].rgbGreen = (BYTE)(g * 255 / 7);
+        bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 3);
+        bmi.bmiColors[i].rgbReserved = 0;
+    }
+
+    /* 4. Create the DIB Section using our custom header + palette */
     hdc = GetDC(NULL);
-    g_hDIB = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, (void**)&g_pPixels, NULL, 0);
+    /* Note the cast to (BITMAPINFO*) below */
+    g_hDIB = CreateDIBSection(hdc, (BITMAPINFO*)&bmi, DIB_RGB_COLORS, (void**)&g_pPixels, NULL, 0);
     ReleaseDC(NULL, hdc);
 
     if (!g_hDIB) {
@@ -222,7 +243,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!socket_connect(&g_VncSock, DEF_HOST, DEF_PORT)) return 0;
     if (!auth_vnc(&g_VncSock, "password")) return 0;
     if (!init_vnc_client(&g_VncSock)) return 0;
-    
+	if (!setup_vnc_pixelformat(&g_VncSock)) return 0;
+	if (!setup_vnc_encodings(&g_VncSock)) return 0;
+
     video_init(fb_width, fb_height);
     request_vnc_refresh(&g_VncSock);
 
@@ -280,8 +303,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 static DWORD lastRefresh = 0;
                 DWORD now = GetTickCount(); /* Win32 millisecond counter */
                 if (!lastRefresh) lastRefresh = now;
-	fprintf(fout, "tick, !sock_dataready, timer=%d\n",now - lastRefresh),fflush(fout);
                 if (now - lastRefresh > 220) {
+	fprintf(fout, "tick, !sock_dataready, timer=%d\n",now - lastRefresh),fflush(fout);
                     request_vnc_refresh(&g_VncSock);
                     lastRefresh = now;
                 }
