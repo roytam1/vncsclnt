@@ -12,7 +12,7 @@ A lightweight, pure Win32 C-based VNC (RFB protocol) client optimized for vintag
 
 ## Repository Structure
 
-* `vncsclnt.c` - Core application entry point (`WinMain`), window subclass procedure (`WndProc`), and mouse/scrollbar routing.
+* `vncsclnt.c` - Core application entry point (`WinMain`), window subclass procedure (`WndProc`), mouse/scrollbar routing, Framebuffer allocation, BGR332 palette generation, and bottom-up memory row-inversion blitting.
 * `VNC.C` / `VNC.H` / `RFBPROTO.H` - RFB protocol parser, network state machine (`ST_IDLE`, `ST_RECT`), and byte-swapping utilities.
 * `resource.h` / `resource.rc` - Dialog template definitions for the connection prompt.
 
@@ -22,7 +22,9 @@ A lightweight, pure Win32 C-based VNC (RFB protocol) client optimized for vintag
 
 The VNC protocol transmits framebuffer updates assuming a top-down coordinate space (row 0 is the top of the screen). Because Win32s GDI handles device-independent bitmaps (DIBs) reliably only in a bottom-up format (positive `biHeight`), the rendering pipeline manually inverts the target rows during copy operations inside `video_blk`:
 
-DIB\_Row=ScreenHeight−1−VNC\_Y### 2. High-Performance Repainting
+DIB\_Row=ScreenHeight−1−VNC\_Y
+
+### 2. High-Performance Repainting
 
 To keep performance high on vintage 486 and Pentium processors, `video_blk` does not issue immediate blits for the entire screen. Instead, it marks the exact updated rectangle as "dirty" via `InvalidateRect`. `WM_PAINT` then handles the clipped redrawing by slicing only the modified coordinate frame out of raw memory:
 
