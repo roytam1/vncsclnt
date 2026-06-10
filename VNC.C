@@ -301,13 +301,13 @@ int setup_vnc_pixelformat(struct VncSocket *fd)
 	pixformmsg.format.bigEndian = 0; // don't care
 	pixformmsg.format.trueColour = 1;
 
-	pixformmsg.format.redMax = htons(3);
+	pixformmsg.format.redMax = htons(7);
 	pixformmsg.format.greenMax = htons(7);
-	pixformmsg.format.blueMax = htons(7);
+	pixformmsg.format.blueMax = htons(3);
 
 	pixformmsg.format.redShift = 0;
-	pixformmsg.format.greenShift = 2;
-	pixformmsg.format.blueShift = 5;
+	pixformmsg.format.greenShift = 3;
+	pixformmsg.format.blueShift = 6;
 
 	sock_write(fd, (byte*)&pixformmsg, sz_rfbSetPixelFormatMsg);
 

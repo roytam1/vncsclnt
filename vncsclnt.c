@@ -87,17 +87,17 @@ int video_init(int width, int height) {
     g_Bmi.bmiHeader.biBitCount    = 8;       
     g_Bmi.bmiHeader.biCompression = BI_RGB;
 
-    /* 4. Generate the BGR332 Palette */
+    /* 4. Generate the BGR233 Palette */
     pLogPal->palVersion = 0x300; // Windows 3.0+
     pLogPal->palNumEntries = 256;
     for (i = 0; i < 256; i++) {
-        int r = (i & 0x03);
-        int g = ((i >> 2) & 0x07);
-        int b = ((i >> 5) & 0x07);
+        int r = (i & 0x07);
+        int g = ((i >> 3) & 0x07);
+        int b = ((i >> 6) & 0x03);
 
-        pLogPal->palPalEntry[i].peRed   = g_Bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 3);
+        pLogPal->palPalEntry[i].peRed   = g_Bmi.bmiColors[i].rgbRed   = (BYTE)(r * 255 / 7);
         pLogPal->palPalEntry[i].peGreen = g_Bmi.bmiColors[i].rgbGreen = (BYTE)(g * 255 / 7);
-        pLogPal->palPalEntry[i].peBlue  = g_Bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 7);
+        pLogPal->palPalEntry[i].peBlue  = g_Bmi.bmiColors[i].rgbBlue  = (BYTE)(b * 255 / 3);
         pLogPal->palPalEntry[i].peFlags = g_Bmi.bmiColors[i].rgbReserved = 0;
     }
 

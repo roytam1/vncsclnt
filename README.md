@@ -12,8 +12,9 @@ A lightweight, pure Win32 C-based VNC (RFB protocol) client optimized for vintag
 
 ## Repository Structure
 
-* `vncsclnt.c` - Core application entry point (`WinMain`), window subclass procedure (`WndProc`), mouse/scrollbar routing, Framebuffer allocation, BGR332 palette generation, and bottom-up memory row-inversion blitting.
+* `vncsclnt.c` - Core application entry point (`WinMain`), window subclass procedure (`WndProc`), mouse/scrollbar routing, Framebuffer allocation, BGR233 palette generation, and bottom-up memory row-inversion blitting.
 * `VNC.C` / `VNC.H` / `RFBPROTO.H` - RFB protocol parser, network state machine (`ST_IDLE`, `ST_RECT`), and byte-swapping utilities.
+* `D3DES.C` / `D3DES.H` - VNC 3DES cryptor.
 * `resource.h` / `resource.rc` - Dialog template definitions for the connection prompt.
 
 ## Technical Architecture Notes
