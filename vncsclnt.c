@@ -88,6 +88,8 @@ int video_init(int width, int height) {
     g_Bmi.bmiHeader.biCompression = BI_RGB;
 
     /* 4. Generate the BGR332 Palette */
+    pLogPal->palVersion = 0x300; // Windows 3.0+
+    pLogPal->palNumEntries = 256;
     for (i = 0; i < 256; i++) {
         int r = (i & 0x03);
         int g = ((i >> 2) & 0x07);
