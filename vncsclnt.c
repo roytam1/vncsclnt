@@ -52,7 +52,8 @@ int              g_ScreenHeight     = 600;
 
 /* --- Win32/GDI Implementation of Missing video.c Functions --- */
 int video_init(int width, int height) {
-    int i;
+    int i, max_x, max_y;
+    RECT r;
     LOGPALETTE* pLogPal;
 
     g_ScreenWidth = width;
@@ -100,6 +101,15 @@ int video_init(int width, int height) {
 
     g_hPalette = CreatePalette(pLogPal);
     free(pLogPal);
+
+    /* Max scroll limit = Server Dimension - Window Dimension */
+    GetClientRect(hWndMain, &r);
+    max_x = (g_ScreenWidth > r.right) ? (g_ScreenWidth - r.right) : 0;
+    max_y = (g_ScreenHeight > r.bottom) ? (g_ScreenHeight - r.bottom) : 0;
+
+    /* Configure scrollbar ranges (100% Win32s Safe) */
+    SetScrollRange(hWndMain, SB_HORZ, 0, max_x, TRUE);
+    SetScrollRange(hWndMain, SB_VERT, 0, max_y, TRUE);
 
     return 0;
 }
