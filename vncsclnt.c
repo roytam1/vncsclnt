@@ -273,10 +273,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
 
         /* --- Input Mappings Replacing DOS kbhit / Getch / Mouse Emulation --- */
-        case WM_KEYDOWN: {
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP: {
             int key = (int)wParam;
+            int keyData = (DWORD)lParam;
+            /* Check if Shift is currently held down */
+            BOOL bShift = (GetKeyState(VK_SHIFT) & 0x8000) ? TRUE : FALSE;
+            /* Check if Caps Lock is toggled on */
+            BOOL bCaps  = (GetKeyState(VK_CAPITAL) & 0x0001) ? TRUE : FALSE;
             /* Note: Basic virtual key translation. Expand to match specific RFB keysyms if needed */
-            send_vnc_key(&g_VncSock, key);
+            send_vnc_key(&g_VncSock, key, keyData, bShift, bCaps);
             request_vnc_refresh(&g_VncSock);
             break;
         }

@@ -755,14 +755,16 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsi
 		return ST_HEXTILE;
 }
 
-int send_vnc_key(struct VncSocket *fd, int kbd)
+int send_vnc_key(struct VncSocket *fd, int kbd, unsigned int keyData, int holdShift, int CapsOn)
 {
 	rfbKeyEventMsg ke = { rfbKeyEvent, 0, 0, 0};
 	CARD16 k = 0;
+	int down = ((keyData & 0x80000000l) == 0);
 
 	switch(kbd) {
 		case VK_BACK  : k = 0xFF08; break; // bksp
 		case VK_TAB   : k = 0xFF09; break; // tab
+		case VK_RETURN: k = 0xFF0D; break; // enter
 		case VK_ESCAPE: k = 0xFF1b; break; // esc
 		case VK_LEFT  : k = 0xFF51; break; // left
 		case VK_UP    : k = 0xFF52; break; // up
@@ -774,9 +776,37 @@ int send_vnc_key(struct VncSocket *fd, int kbd)
 		case VK_END   : k = 0xFF57; break; // end
 		case VK_PRIOR : k = 0xFF55; break; // pg-up
 		case VK_NEXT  : k = 0xFF56; break; // pg-down
+		case VK_SHIFT : k = 0xFFE1; break; // shift
+		case VK_MENU  : k = 0xFFE9; break; // alt
+		case VK_CONTROL: k = 0xFFE3; break; // ctrl
 		default:
 			if (kbd >= VK_F1 && kbd <=VK_F12) { // F1..F12
 				k = 0xFFBE + (kbd-VK_F1);
+			} else if (kbd >= 'A' && kbd <= 'Z') {
+				/* If Shift XOR CapsLock is active, it's uppercase. Otherwise, lowercase. */
+				if (holdShift ^ CapsOn) {
+					k = kbd; // 'A'-'Z' maps directly to uppercase X11 Keysyms (0x41-0x5A)
+				} else {
+					k = kbd + 32; // Convert to lowercase 'a'-'z' (0x61-0x7A)
+				}
+			} else if (kbd >= '0' && kbd <= '9') {
+				if (holdShift) {
+					/* Manually map US keyboard shifted symbols for old-school reliability */
+					switch(kbd) {
+						case '1': k = '!'; break;
+						case '2': k = '@'; break;
+						case '3': k = '#'; break;
+						case '4': k = '$'; break;
+						case '5': k = '%'; break;
+						case '6': k = '^'; break;
+						case '7': k = '&'; break;
+						case '8': k = '*'; break;
+						case '9': k = '('; break;
+						case '0': k = ')'; break;
+					}
+				} else {
+					k = kbd;
+				}
 			} else if (kbd < 0x100) k = kbd;
 				else k=0;
 			break;
@@ -784,9 +814,7 @@ int send_vnc_key(struct VncSocket *fd, int kbd)
 
 	if (k>0) {
 		ke.key = htonl(k);
-		ke.down = 1;
-		sock_write(fd, (byte*)&ke, sz_rfbKeyEventMsg);
-		ke.down = 0;
+		ke.down = down;
 		sock_write(fd, (byte*)&ke, sz_rfbKeyEventMsg);
 	}
 	

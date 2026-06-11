@@ -50,7 +50,7 @@ extern int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
 extern int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char* buf);
-extern int send_vnc_key(struct VncSocket *fd, int kbd);
+extern int send_vnc_key(struct VncSocket *fd, int kbd, unsigned int keyData, int holdShift, int CapsOn);
 extern int send_vnc_shift(struct VncSocket *fd, int vnc_key, int down);
 extern int send_vnc_pointer(struct VncSocket *fd, int x, int y, int b);
 
