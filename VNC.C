@@ -331,10 +331,10 @@ int setup_vnc_encodings(struct VncSocket *fd)
 
 	encodingsmsgp->type = rfbSetEncodings;
 	encodingsmsgp->nEncodings = htons(ENCODINGS);
-	enc[0] = htonl(rfbEncodingHextile);
+	enc[0] = htonl(rfbEncodingRRE);
 	enc[1] = htonl(rfbEncodingCopyRect);
 	enc[2] = htonl(rfbEncodingRaw);
-	enc[3] = htonl(rfbEncodingRRE);
+	enc[3] = htonl(rfbEncodingHextile);
 	enc[4] = htonl(rfbEncodingCoRRE);
 	sock_write(fd, (byte*)encodingsmsgp, sz_enc);
 
@@ -465,7 +465,7 @@ int parse_vnc_rect(struct VncSocket *fd)
 		rfb_total = rfb_rrehead.nSubrects = ntohl(rfb_rrehead.nSubrects);
 
 #ifdef DEBUG
-		fprintf(fout, "    enc_rre: %ld subrectangles\n", rfb_total),fflush(fout);
+		fprintf(fout, "    enc_%s: %ld subrectangles\n", rfb_uprect.encoding==rfbEncodingCoRRE ? "crre" : "rre", rfb_total),fflush(fout);
 #endif
 				
 		rfb_pos=-1;
@@ -544,6 +544,11 @@ int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	return ST_RECT;
 }
 
+/* encodings below needs to call drawbar and video_blk directly */
+extern void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in);
+extern void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in);
+extern void drawbar(int x, int y, int w, int h, char color);
+
 int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf)
 {
@@ -553,27 +558,41 @@ int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	fprintf(fout, "  enter parse_vnc_rre, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
 #endif
 
+	/* read background color */
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
 	if (i != sizeof(CARD8)) return ST_ERROR;
-	if (rfb_pos++ < 0) {
-		*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
-		*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
-		return ST_RRE;
-	}
+	/* draw background color */
+	drawbar(rfb_uprect.r.x, rfb_uprect.r.y, rfb_uprect.r.w, rfb_uprect.r.h, *buf);
 
-	i = sock_read(fd, (byte*)&subRect,sz_rfbRectangle);
-	if (i != sz_rfbRectangle) return ST_ERROR;
-	rfb_pos+=i;
+	/* 4. Process all subrectangles */
+	for (rfb_pos = 0; rfb_pos < rfb_total; rfb_pos++) {
+		unsigned char sub_color;
 
-	subRect.x = ntohs(subRect.x);
-	subRect.y = ntohs(subRect.y);
-	subRect.w = ntohs(subRect.w);
-	subRect.h = ntohs(subRect.h);
+		/* Read the color */
+		if (sock_read(fd, (char*)&sub_color, sizeof(CARD8)) < 0) return ST_ERROR;
 
-	*x=rfb_uprect.r.x + subRect.x;
-	*y=rfb_uprect.r.y + subRect.y;
-	*w=subRect.w;
-	*h=subRect.h;
+		/* Read the geometry (4x 16-bit integers = 8 bytes) */
+		i = sock_read(fd, (byte*)&subRect,sz_rfbRectangle);
+		if (i != sz_rfbRectangle) return ST_ERROR;
+
+		/* Convert Endianness */
+		subRect.x = ntohs(subRect.x);
+		subRect.y = ntohs(subRect.y);
+		subRect.w = ntohs(subRect.w);
+		subRect.h = ntohs(subRect.h);
+
+        /* * Draw the subrectangle.
+         * CRITICAL: sx and sy are relative to rect_x and rect_y! 
+         */
+        drawbar(rfb_uprect.r.x + subRect.x, rfb_uprect.r.y + subRect.y, subRect.w, subRect.h, sub_color);
+    }
+
+    /* tell surface to update */
+	*x = rfb_uprect.r.x;
+	*y = rfb_uprect.r.y;
+	*w = rfb_uprect.r.w;
+	*h = rfb_uprect.r.h;
+    video_blk_upd(*x, *y, *w, *h, 0, 0, NULL);
 
 	if (rfb_pos>=rfb_total) {
 		rfb_rect++;
@@ -593,10 +612,16 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
 	if (i != sizeof(CARD8)) return ST_ERROR;
+	if (!rfb_total) {
+		*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
+		*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
+		return ST_IDLE;
+	}
+
 	if (rfb_pos++ < 0) {
 		*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
 		*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
-		return ST_RRE;
+		return ST_CRRE;
 	}
 
 	i = sock_read(fd, (byte*)&coRect,sz_rfbCoRRERectangle);
@@ -612,12 +637,8 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 		rfb_rect++;
 		return ST_RECT;
 	} else
-		return ST_RRE;
+		return ST_CRRE;
 }
-
-/* it needs to call video_blk directly */
-extern void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in);
-extern void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in);
 
 /* Hextile Bitmask Constants */
 #define HEXTILE_RAW                0x01

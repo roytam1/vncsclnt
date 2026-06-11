@@ -164,13 +164,18 @@ void video_blt(int dest_x, int dest_y, int w, int h, int src_x, int src_y) {
 }
 
 void drawbar(int x, int y, int w, int h, char color) {
-    int row;
-    RECT rect;
+    int row, col;
+
+    /* 2. Process row by row with bottom-up inversion */
     for (row = 0; row < h; row++) {
-        memset(&g_pPixels[(y + row) * g_ScreenWidth + x], color, w);
+        int current_network_y = y + row;
+        int win32s_dib_row = g_ScreenHeight - 1 - current_network_y;
+        
+        BYTE* pDest = (BYTE*)&g_pPixels[win32s_dib_row * g_ScreenWidth + x];
+
+        /* memset is heavily optimized in C and blazingly fast on a 486 */
+        memset(pDest, color, w);
     }
-    SetRect(&rect, x, y, x + w, y + h);
-    InvalidateRect(hWndMain, &rect, FALSE);
 }
 
 /* --- Main Windows Message Loop Window Handler --- */
@@ -598,7 +603,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	fprintf(fout, " ST_RRE\n"),fflush(fout);
 #endif
                         g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, *g_BufIn);
+                        //drawbar(x, y, w, h, *g_BufIn);
                         break;
                     case ST_CRRE:  
 #ifdef DEBUG
