@@ -116,25 +116,33 @@ int video_init(int width, int height) {
     return 0;
 }
 
-void video_blk(int x, int y, int w, int h, long p, int s, char* buf_in) {
+void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in) {
     int row;
-    RECT r;
 
-    /* 1. Update our persistent memory buffer (Bottom-Up layout transformation) */
+    /* Update our persistent memory buffer (Bottom-Up layout transformation) */
     for (row = 0; row < h; row++) {
         int current_network_y = y + row;
         int win32s_dib_row = g_ScreenHeight - 1 - current_network_y;
         memcpy(&g_pPixels[win32s_dib_row * g_ScreenWidth + x], &buf_in[row * w], w);
     }
+}
 
-    /* 2. Convert raw VNC screen coordinates to current scrolled Client space */
+void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in) {
+    RECT r;
+
+    /* Convert raw VNC screen coordinates to current scrolled Client space */
     r.left   = x - g_ScrollX;
     r.top    = y - g_ScrollY;
     r.right  = r.left + w;
     r.bottom = r.top + h;
 
-    /* 3. Tell Windows this exact box needs a repaint pass */
+    /* Tell Windows this exact box needs a repaint pass */
     InvalidateRect(hWndMain, &r, FALSE);
+}
+
+void video_blk(int x, int y, int w, int h, long p, int s, char* buf_in) {
+    video_blk_mem(x, y, w, h, p, s, buf_in);
+    video_blk_upd(x, y, w, h, p, s, buf_in);
 }
 
 void video_blt(int dest_x, int dest_y, int w, int h, int src_x, int src_y) {
@@ -598,6 +606,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #endif
                         g_VncState = parse_vnc_crre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
                         drawbar(x, y, w, h, *g_BufIn);
+                        break;
+                    case ST_HEXTILE:
+#ifdef DEBUG
+	fprintf(fout, " ST_HEXTILE\n"),fflush(fout);
+#endif
+                        g_VncState = parse_vnc_hextile(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
                         break;
                 }
 #ifdef DEBUG

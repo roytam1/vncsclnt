@@ -11,6 +11,7 @@
 #define ST_COPY		4
 #define ST_RRE		5
 #define ST_CRRE		7
+#define ST_HEXTILE	8
 
 #define VNC_KEY_SHIFT	0xFFE1
 #define VNC_KEY_CONTROL	0xFFE3

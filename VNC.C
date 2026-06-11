@@ -316,7 +316,7 @@ int setup_vnc_pixelformat(struct VncSocket *fd)
 
 int setup_vnc_encodings(struct VncSocket *fd)
 {
-#define ENCODINGS 4
+#define ENCODINGS 5
 	rfbSetEncodingsMsg *encodingsmsgp;
 	size_t sz_enc;
 	CARD32 *enc;
@@ -331,10 +331,11 @@ int setup_vnc_encodings(struct VncSocket *fd)
 
 	encodingsmsgp->type = rfbSetEncodings;
 	encodingsmsgp->nEncodings = htons(ENCODINGS);
-	enc[0] = htonl(rfbEncodingRaw);
+	enc[0] = htonl(rfbEncodingHextile);
 	enc[1] = htonl(rfbEncodingCopyRect);
-	enc[2] = htonl(rfbEncodingRRE);
-	enc[3] = htonl(rfbEncodingCoRRE);
+	enc[2] = htonl(rfbEncodingRaw);
+	enc[3] = htonl(rfbEncodingRRE);
+	enc[4] = htonl(rfbEncodingCoRRE);
 	sock_write(fd, (byte*)encodingsmsgp, sz_enc);
 
 	free(encodingsmsgp);
@@ -471,6 +472,8 @@ int parse_vnc_rect(struct VncSocket *fd)
 		if (rfb_uprect.encoding==rfbEncodingCoRRE)
 			return ST_CRRE;
 		return ST_RRE;
+	case rfbEncodingHextile:
+		return ST_HEXTILE;
 	}
 	return ST_ERROR; // unknown encoding scheme
 }
@@ -547,7 +550,7 @@ int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	int i;
 	rfbRectangle subRect;
 #ifdef DEBUG
-	fprintf(fout, "  enter parse_vnc_rre\n"),fflush(fout);
+	fprintf(fout, "  enter parse_vnc_rre, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
 #endif
 
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
@@ -560,7 +563,8 @@ int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 
 	i = sock_read(fd, (byte*)&subRect,sz_rfbRectangle);
 	if (i != sz_rfbRectangle) return ST_ERROR;
-	
+	rfb_pos+=i;
+
 	subRect.x = ntohs(subRect.x);
 	subRect.y = ntohs(subRect.y);
 	subRect.w = ntohs(subRect.w);
@@ -584,7 +588,7 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	int i;
 	rfbCoRRERectangle coRect;
 #ifdef DEBUG
-	fprintf(fout, "  enter parse_vnc_crre\n"),fflush(fout);
+	fprintf(fout, "  enter parse_vnc_crre, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
 #endif
 
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
@@ -597,7 +601,8 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 
 	i = sock_read(fd, (byte*)&coRect,sz_rfbCoRRERectangle);
 	if (i != sz_rfbCoRRERectangle) return ST_ERROR;
-	
+	rfb_pos+=i;
+
 	*x=rfb_uprect.r.x + coRect.x;
 	*y=rfb_uprect.r.y + coRect.y;
 	*w=coRect.w;
@@ -608,6 +613,132 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 		return ST_RECT;
 	} else
 		return ST_RRE;
+}
+
+/* it needs to call video_blk directly */
+extern void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in);
+extern void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in);
+
+/* Hextile Bitmask Constants */
+#define HEXTILE_RAW                0x01
+#define HEXTILE_BG_SPECIFIED       0x02
+#define HEXTILE_FG_SPECIFIED       0x04
+#define HEXTILE_ANY_SUBRECTS       0x08
+#define HEXTILE_SUBRECTS_COLORED   0x10
+
+int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
+	long *p, int *s, unsigned char* buf)
+{
+	int tx, ty, tw, th;
+	int o;
+	CARD8 bg_color = 0;
+	CARD8 fg_color = 0;
+
+	/* Buffer to hold one fully reconstructed tile (max 16x16 = 256 bytes) */
+	CARD8 tile_buf[256];
+#ifdef DEBUG
+	fprintf(fout, "  enter parse_vnc_hextile, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
+#endif
+
+	*s = rfb_total-rfb_pos;
+	*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
+	*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
+
+	/* Process the rectangle in 16x16 chunks, left-to-right, top-to-bottom */
+    for (ty = *y; ty < *y + *h; ty += 16) {
+        for (tx = *x; tx < *x + *w; tx += 16) {
+
+            CARD8 subencoding;
+            int i, r;
+
+            /* Calculate actual tile dimensions (edges might be smaller than 16x16) */
+            tw = 16;
+            th = 16;
+            if (tx + 16 > *x + *w) tw = *x + *w - tx;
+            if (ty + 16 > *y + *h) th = *y + *h - ty;
+
+            /* 1. Read the subencoding flag for this specific tile */
+            if (o = sock_read(fd, (char*)&subencoding, sizeof(CARD8)) < 0) return ST_ERROR;
+            rfb_pos+=o;
+
+            /* 2. Is it just raw uncompressed pixels? */
+            if (subencoding & HEXTILE_RAW) {
+                if (o = sock_read(fd, tile_buf, tw * th) < 0) return ST_ERROR;
+                rfb_pos+=o;
+                video_blk_mem(tx, ty, tw, th, 0, 0, tile_buf);
+                continue; /* Move to the next tile */
+            }
+
+            /* 3. Update stateful background/foreground colors if provided */
+            if (subencoding & HEXTILE_BG_SPECIFIED) {
+                if (o = sock_read(fd, (char*)&bg_color, sizeof(CARD8)) < 0) return ST_ERROR;
+                rfb_pos+=o;
+            }
+            if (subencoding & HEXTILE_FG_SPECIFIED) {
+                if (o = sock_read(fd, (char*)&fg_color, sizeof(CARD8)) < 0) return ST_ERROR;
+                rfb_pos+=o;
+            }
+
+            /* 4. Fill the entire tile buffer with the background color */
+            memset(tile_buf, bg_color, tw * th);
+
+            /* 5. Draw any colored sub-rectangles on top of the background */
+            if (subencoding & HEXTILE_ANY_SUBRECTS) {
+                CARD8 num_subrects;
+                if (o = sock_read(fd, (char*)&num_subrects, sizeof(CARD8)) < 0) return ST_ERROR;
+                rfb_pos+=o;
+
+                for (i = 0; i < num_subrects; i++) {
+                    CARD8 sub_color = fg_color;
+                    CARD8 xy, wh;
+                    int sx, sy, sw, sh;
+
+                    /* If SUBRECTS_COLORED is set, this subrect has a unique color */
+                    if (subencoding & HEXTILE_SUBRECTS_COLORED) {
+                        if (o = sock_read(fd, (char*)&sub_color, sizeof(CARD8)) < 0) return ST_ERROR;
+                        rfb_pos+=o;
+                    }
+
+                    /* Read geometry bytes */
+                    if (o = sock_read(fd, (char*)&xy, sizeof(CARD8)) < 0) return ST_ERROR;
+                    rfb_pos+=o;
+                    if (o = sock_read(fd, (char*)&wh, sizeof(CARD8)) < 0) return ST_ERROR;
+                    rfb_pos+=o;
+
+                    /* Extract X/Y (high/low nibbles) and W/H (high/low nibbles + 1) */
+                    sx = (xy >> 4);
+                    sy = (xy & 0x0F);
+                    sw = (wh >> 4) + 1;
+                    sh = (wh & 0x0F) + 1;
+
+                    /* Draw the subrect directly into our 16x16 tile buffer */
+                    for (r = 0; r < sh; r++) {
+                        memset(&tile_buf[(sy + r) * tw + sx], sub_color, sw);
+                    }
+                }
+            }
+
+            /* 6. Push the fully assembled tile to our Win32s graphics pipeline */
+            video_blk_mem(tx, ty, tw, th, 0, 0, tile_buf);
+        }
+    }
+	if (rfb_pos==0) {
+		*x = rfb_uprect.r.x;
+		*y = rfb_uprect.r.y;
+		*w = rfb_uprect.r.w;
+		*h = rfb_uprect.r.h;
+	}
+	*p = rfb_pos;
+	*s = o;
+
+    /* tell surface to update */
+    video_blk_upd(*x, *y, *w, *h, *p, *s, NULL);
+
+	if (rfb_pos>=rfb_total) {
+		rfb_rect++;
+		return ST_RECT;
+	} else 
+		return ST_HEXTILE;
 }
 
 int send_vnc_key(struct VncSocket *fd, int kbd)
