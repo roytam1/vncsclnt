@@ -478,23 +478,21 @@ int parse_vnc_rect(struct VncSocket *fd)
 	return ST_ERROR; // unknown encoding scheme
 }
 
-int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
-	long *p, int *s, unsigned char* buf)
+int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsigned char* buf)
 {
 	int i;
-	*s = rfb_total-rfb_pos;
 #ifdef DEBUG
 	fprintf(fout, "  enter parse_vnc_raw, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
 #endif
 
-	i = sock_read(fd, buf, *s);
+	i = sock_read(fd, buf, rfb_total-rfb_pos);
 #ifdef DEBUG
 	fprintf(fout, "    enc_raw: sock_read returns %d\n", i),fflush(fout);
 #endif
 	//if (i != *s) return ST_ERROR;
 
 #ifdef DEBUG
-	fprintf(fout, "    enc_raw: read %d, %ld of %ld bytes\n",*s,rfb_pos,rfb_total),fflush(fout);
+	fprintf(fout, "    enc_raw: read %d, %ld of %ld bytes\n",rfb_total-rfb_pos,rfb_pos,rfb_total),fflush(fout);
 #endif
 
 	if (rfb_pos==0) {
@@ -503,8 +501,6 @@ int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 		*w = rfb_uprect.r.w;
 		*h = rfb_uprect.r.h;
 	}
-	*p = rfb_pos;
-	*s = i;
 
 	rfb_pos+=i;
 	if (rfb_pos>=rfb_total) {
@@ -545,8 +541,8 @@ int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 }
 
 /* encodings below needs to call drawbar and video_blk directly */
-extern void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in);
-extern void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in);
+extern void video_blk_mem(int x, int y, int w, int h, char* buf_in);
+extern void video_blk_upd(int x, int y, int w, int h);
 extern void drawbar(int x, int y, int w, int h, char color);
 
 int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
@@ -592,7 +588,7 @@ int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	*y = rfb_uprect.r.y;
 	*w = rfb_uprect.r.w;
 	*h = rfb_uprect.r.h;
-    video_blk_upd(*x, *y, *w, *h, 0, 0, NULL);
+    video_blk_upd(*x, *y, *w, *h);
 
 	if (rfb_pos>=rfb_total) {
 		rfb_rect++;
@@ -638,7 +634,7 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	*y = rfb_uprect.r.y;
 	*w = rfb_uprect.r.w;
 	*h = rfb_uprect.r.h;
-    video_blk_upd(*x, *y, *w, *h, 0, 0, NULL);
+    video_blk_upd(*x, *y, *w, *h);
 
 	if (rfb_pos>=rfb_total) {
 		rfb_rect++;
@@ -654,8 +650,7 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 #define HEXTILE_ANY_SUBRECTS       0x08
 #define HEXTILE_SUBRECTS_COLORED   0x10
 
-int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
-	long *p, int *s, unsigned char* buf)
+int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsigned char* buf)
 {
 	int tx, ty, tw, th;
 	int o;
@@ -668,7 +663,6 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	fprintf(fout, "  enter parse_vnc_hextile, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
 #endif
 
-	*s = rfb_total-rfb_pos;
 	*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
 	*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
 
@@ -693,7 +687,7 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
             if (subencoding & HEXTILE_RAW) {
                 if (o = sock_read(fd, tile_buf, tw * th) < 0) return ST_ERROR;
                 rfb_pos+=o;
-                video_blk_mem(tx, ty, tw, th, 0, 0, tile_buf);
+                video_blk_mem(tx, ty, tw, th, tile_buf);
                 continue; /* Move to the next tile */
             }
 
@@ -747,20 +741,12 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
             }
 
             /* 6. Push the fully assembled tile to our Win32s graphics pipeline */
-            video_blk_mem(tx, ty, tw, th, 0, 0, tile_buf);
+            video_blk_mem(tx, ty, tw, th, tile_buf);
         }
     }
-	if (rfb_pos==0) {
-		*x = rfb_uprect.r.x;
-		*y = rfb_uprect.r.y;
-		*w = rfb_uprect.r.w;
-		*h = rfb_uprect.r.h;
-	}
-	*p = rfb_pos;
-	*s = o;
 
     /* tell surface to update */
-    video_blk_upd(*x, *y, *w, *h, *p, *s, NULL);
+    video_blk_upd(*x, *y, *w, *h);
 
 	if (rfb_pos>=rfb_total) {
 		rfb_rect++;

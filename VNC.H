@@ -41,13 +41,15 @@ extern int request_vnc_refresh(struct VncSocket *fd);
 extern int parse_vnc_msg(struct VncSocket *fd);
 extern int parse_vnc_rect(struct VncSocket *fd);
 extern int parse_vnc_raw(struct VncSocket *fd, int *x, int *y, int *w, int *h,
-			long *p, int *s, unsigned char* buf);
+			unsigned char* buf);
 extern int parse_vnc_copy(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			int *srcx, int *srcy);
 extern int parse_vnc_rre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
 extern int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 			unsigned char *buf);
+extern int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h,
+			unsigned char* buf);
 extern int send_vnc_key(struct VncSocket *fd, int kbd);
 extern int send_vnc_shift(struct VncSocket *fd, int vnc_key, int down);
 extern int send_vnc_pointer(struct VncSocket *fd, int x, int y, int b);

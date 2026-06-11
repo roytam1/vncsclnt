@@ -116,7 +116,7 @@ int video_init(int width, int height) {
     return 0;
 }
 
-void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in) {
+void video_blk_mem(int x, int y, int w, int h, char* buf_in) {
     int row;
 
     /* Update our persistent memory buffer (Bottom-Up layout transformation) */
@@ -127,7 +127,7 @@ void video_blk_mem(int x, int y, int w, int h, long p, int s, char* buf_in) {
     }
 }
 
-void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in) {
+void video_blk_upd(int x, int y, int w, int h) {
     RECT r;
 
     /* Convert raw VNC screen coordinates to current scrolled Client space */
@@ -140,9 +140,9 @@ void video_blk_upd(int x, int y, int w, int h, long p, int s, char* buf_in) {
     InvalidateRect(hWndMain, &r, FALSE);
 }
 
-void video_blk(int x, int y, int w, int h, long p, int s, char* buf_in) {
-    video_blk_mem(x, y, w, h, p, s, buf_in);
-    video_blk_upd(x, y, w, h, p, s, buf_in);
+void video_blk(int x, int y, int w, int h, char* buf_in) {
+    video_blk_mem(x, y, w, h, buf_in);
+    video_blk_upd(x, y, w, h);
 }
 
 void video_blt(int dest_x, int dest_y, int w, int h, int src_x, int src_y) {
@@ -181,8 +181,7 @@ void drawbar(int x, int y, int w, int h, char color) {
 /* --- Main Windows Message Loop Window Handler --- */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     /* Keep parsing state variables safe across windows messaging cycles */
-    static int x, y, w, h, s;
-    static long p;
+    static int x, y, w, h;
     static int srcx, srcy;
 
     switch (message) {
@@ -588,8 +587,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #ifdef DEBUG
 	fprintf(fout, " ST_RAW\n"),fflush(fout);
 #endif
-                        g_VncState = parse_vnc_raw(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
-                        video_blk(x, y, w, h, p, s, g_BufIn);
+                        g_VncState = parse_vnc_raw(&g_VncSock, &x, &y, &w, &h, g_BufIn);
+                        video_blk(x, y, w, h, g_BufIn);
                         break;
                     case ST_COPY:
 #ifdef DEBUG
@@ -614,7 +613,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #ifdef DEBUG
 	fprintf(fout, " ST_HEXTILE\n"),fflush(fout);
 #endif
-                        g_VncState = parse_vnc_hextile(&g_VncSock, &x, &y, &w, &h, &p, &s, g_BufIn);
+                        g_VncState = parse_vnc_hextile(&g_VncSock, &x, &y, &w, &h, g_BufIn);
                         break;
                 }
 #ifdef DEBUG
