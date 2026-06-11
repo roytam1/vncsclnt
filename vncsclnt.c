@@ -603,14 +603,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	fprintf(fout, " ST_RRE\n"),fflush(fout);
 #endif
                         g_VncState = parse_vnc_rre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        //drawbar(x, y, w, h, *g_BufIn);
                         break;
                     case ST_CRRE:  
 #ifdef DEBUG
 	fprintf(fout, " ST_CRRE\n"),fflush(fout);
 #endif
                         g_VncState = parse_vnc_crre(&g_VncSock, &x, &y, &w, &h, g_BufIn);
-                        drawbar(x, y, w, h, *g_BufIn);
                         break;
                     case ST_HEXTILE:
 #ifdef DEBUG

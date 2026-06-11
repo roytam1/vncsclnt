@@ -331,10 +331,10 @@ int setup_vnc_encodings(struct VncSocket *fd)
 
 	encodingsmsgp->type = rfbSetEncodings;
 	encodingsmsgp->nEncodings = htons(ENCODINGS);
-	enc[0] = htonl(rfbEncodingRRE);
+	enc[0] = htonl(rfbEncodingHextile);
 	enc[1] = htonl(rfbEncodingCopyRect);
-	enc[2] = htonl(rfbEncodingRaw);
-	enc[3] = htonl(rfbEncodingHextile);
+	enc[2] = htonl(rfbEncodingRRE);
+	enc[3] = htonl(rfbEncodingRaw);
 	enc[4] = htonl(rfbEncodingCoRRE);
 	sock_write(fd, (byte*)encodingsmsgp, sz_enc);
 
@@ -610,28 +610,35 @@ int parse_vnc_crre(struct VncSocket *fd, int *x, int *y, int *w, int *h,
 	fprintf(fout, "  enter parse_vnc_crre, rfb_total=%d, rfb_pos=%d\n",rfb_total,rfb_pos),fflush(fout);
 #endif
 
+	/* read background color */
 	i = sock_read(fd, (byte*)buf,sizeof(CARD8));
 	if (i != sizeof(CARD8)) return ST_ERROR;
-	if (!rfb_total) {
-		*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
-		*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
-		return ST_IDLE;
-	}
+	/* draw background color */
+	drawbar(rfb_uprect.r.x, rfb_uprect.r.y, rfb_uprect.r.w, rfb_uprect.r.h, *buf);
 
-	if (rfb_pos++ < 0) {
-		*x = rfb_uprect.r.x; *y = rfb_uprect.r.y;
-		*w = rfb_uprect.r.w; *h = rfb_uprect.r.h;
-		return ST_CRRE;
-	}
+	/* 4. Process all subrectangles */
+	for (rfb_pos = 0; rfb_pos < rfb_total; rfb_pos++) {
+		unsigned char sub_color;
 
-	i = sock_read(fd, (byte*)&coRect,sz_rfbCoRRERectangle);
-	if (i != sz_rfbCoRRERectangle) return ST_ERROR;
-	rfb_pos+=i;
+		/* Read the color */
+		if (sock_read(fd, (char*)&sub_color, sizeof(CARD8)) < 0) return ST_ERROR;
 
-	*x=rfb_uprect.r.x + coRect.x;
-	*y=rfb_uprect.r.y + coRect.y;
-	*w=coRect.w;
-	*h=coRect.h;
+		/* Read the geometry (4x 8-bit integers = 4 bytes) */
+		i = sock_read(fd, (byte*)&coRect,sz_rfbCoRRERectangle);
+		if (i != sz_rfbCoRRERectangle) return ST_ERROR;
+
+        /* * Draw the subrectangle.
+         * CRITICAL: sx and sy are relative to rect_x and rect_y! 
+         */
+        drawbar(rfb_uprect.r.x + coRect.x, rfb_uprect.r.y + coRect.y, coRect.w, coRect.h, sub_color);
+    }
+
+    /* tell surface to update */
+	*x = rfb_uprect.r.x;
+	*y = rfb_uprect.r.y;
+	*w = rfb_uprect.r.w;
+	*h = rfb_uprect.r.h;
+    video_blk_upd(*x, *y, *w, *h, 0, 0, NULL);
 
 	if (rfb_pos>=rfb_total) {
 		rfb_rect++;
