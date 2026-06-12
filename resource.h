@@ -5,6 +5,10 @@
 #define IDC_STATIC        -1
 #endif
 
+#ifndef ES_NUMBER
+#define ES_NUMBER         0x2000L
+#endif
+
 #define IDD_CONNECT_DLG   101
 #define IDC_IP_EDIT       1001
 #define IDC_PORT_EDIT     1002
