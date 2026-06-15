@@ -759,12 +759,14 @@ int send_vnc_key(struct VncSocket *fd, int kbd, unsigned int keyData, int holdSh
 {
 	rfbKeyEventMsg ke = { rfbKeyEvent, 0, 0, 0};
 	CARD16 k = 0;
+	UINT scanCode = (keyData >> 16) & 0xFF;
+	BOOL isExtended = (keyData & (1 << 24)) ? TRUE : FALSE;
 	int down = ((keyData & 0x80000000l) == 0);
 
 	switch(kbd) {
 		case VK_BACK  : k = 0xFF08; break; // bksp
 		case VK_TAB   : k = 0xFF09; break; // tab
-		case VK_RETURN: k = 0xFF0D; break; // enter
+		case VK_RETURN: k = isExtended ? 0xFF8D : 0xFF0D; break; // enter
 		case VK_ESCAPE: k = 0xFF1b; break; // esc
 		case VK_LEFT  : k = 0xFF51; break; // left
 		case VK_UP    : k = 0xFF52; break; // up
@@ -776,9 +778,9 @@ int send_vnc_key(struct VncSocket *fd, int kbd, unsigned int keyData, int holdSh
 		case VK_END   : k = 0xFF57; break; // end
 		case VK_PRIOR : k = 0xFF55; break; // pg-up
 		case VK_NEXT  : k = 0xFF56; break; // pg-down
-		case VK_SHIFT : k = 0xFFE1; break; // shift
-		case VK_MENU  : k = 0xFFE9; break; // alt
-		case VK_CONTROL: k = 0xFFE3; break; // ctrl
+		case VK_SHIFT : k = isExtended ? 0xFFE2 : 0xFFE1; break; // shift
+		case VK_MENU  : k = isExtended ? 0xFFEA : 0xFFE9; break; // alt
+		case VK_CONTROL: k = isExtended ? 0xFFE4 : 0xFFE3; break; // ctrl
 		default:
 			if (kbd >= VK_F1 && kbd <=VK_F12) { // F1..F12
 				k = 0xFFBE + (kbd-VK_F1);
@@ -807,8 +809,25 @@ int send_vnc_key(struct VncSocket *fd, int kbd, unsigned int keyData, int holdSh
 				} else {
 					k = kbd;
 				}
-			} else if (kbd < 0x100) k = kbd;
-				else k=0;
+			} else {
+				BYTE keyState[256];
+				int shiftRes;
+				WORD asciiVal = 0;
+				/* 1. Capture the exact current state of all modifiers (Shift, Caps, AltGr) */
+				GetKeyboardState(keyState);
+
+				/* 2. Let Windows handle all printable layout translation (Letters, Numbers, Symbols) */
+				shiftRes = ToAscii(kbd, scanCode, keyState, &asciiVal, 0);
+				if (shiftRes == 1 || shiftRes == 2) {
+					char c = (char)(asciiVal & 0xFF);
+
+					/* Only accept standard visible ASCII ranges (0x20 to 0x7E).
+					   This naturally screens out things like Ctrl+C (0x03) or Backspace (0x08) */
+					if (c >= 32 && c <= 126) {
+						k = c; /* In X11, standard ASCII matches Keysym 1:1 */
+					}
+				}
+			}
 			break;
 	}
 
