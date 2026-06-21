@@ -476,8 +476,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     MSG msg;
     BOOL bRunning = TRUE;
     DWORD result;
-    int x, y, w, h, s, srcx, srcy;
-    long p;
+    int x, y, w, h, srcx, srcy;
 
 #ifdef DEBUG
     fout = fopen("vncsclnt.log", "w");
