@@ -314,7 +314,7 @@ int setup_vnc_pixelformat(struct VncSocket *fd)
 	return 1;
 }
 
-int setup_vnc_encodings(struct VncSocket *fd)
+int setup_vnc_encodings(struct VncSocket *fd, int useFast)
 {
 #define ENCODINGS 5
 	rfbSetEncodingsMsg *encodingsmsgp;
@@ -331,10 +331,10 @@ int setup_vnc_encodings(struct VncSocket *fd)
 
 	encodingsmsgp->type = rfbSetEncodings;
 	encodingsmsgp->nEncodings = htons(ENCODINGS);
-	enc[0] = htonl(rfbEncodingHextile);
+	enc[0] = useFast ? htonl(rfbEncodingRaw) : htonl(rfbEncodingHextile);
 	enc[1] = htonl(rfbEncodingCopyRect);
 	enc[2] = htonl(rfbEncodingRRE);
-	enc[3] = htonl(rfbEncodingRaw);
+	enc[3] = useFast ? htonl(rfbEncodingHextile) : htonl(rfbEncodingRaw);;
 	enc[4] = htonl(rfbEncodingCoRRE);
 	sock_write(fd, (byte*)encodingsmsgp, sz_enc);
 

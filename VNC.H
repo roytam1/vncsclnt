@@ -36,7 +36,7 @@ extern int sock_putc(struct VncSocket* s, char ch);
 extern int auth_vnc(struct VncSocket *fd, char *passwd);
 extern int init_vnc_client(struct VncSocket *fd);
 extern int setup_vnc_pixelformat(struct VncSocket *fd);
-extern int setup_vnc_encodings(struct VncSocket *fd);
+extern int setup_vnc_encodings(struct VncSocket *fd, int useFast);
 extern int request_vnc_refresh(struct VncSocket *fd);
 extern int parse_vnc_msg(struct VncSocket *fd);
 extern int parse_vnc_rect(struct VncSocket *fd);

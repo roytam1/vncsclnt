@@ -13,6 +13,7 @@
 char g_VncIP[64]   = "192.168.1.100"; /* Provide default values */
 int  g_VncPort     = 5900;
 char g_VncPass[10] = "";
+int  g_UseFastEncoding = FALSE;
 
 /* --- External VNC Library Functions (Assumed from your repo) --- */
 #include "vnc.h"
@@ -448,6 +449,7 @@ BOOL CALLBACK ConnectDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
             SetDlgItemText(hDlg, IDC_IP_EDIT, g_VncIP);
             SetDlgItemInt(hDlg, IDC_PORT_EDIT, g_VncPort, FALSE);
             SetDlgItemText(hDlg, IDC_PASS_EDIT, g_VncPass);
+            if(g_UseFastEncoding) SendDlgItemMessage(hDlg, IDC_FASTENC_CHK, BM_SETCHECK, BST_CHECKED, 0);
             return TRUE;
 
         case WM_COMMAND:
@@ -457,7 +459,8 @@ BOOL CALLBACK ConnectDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
                     GetDlgItemText(hDlg, IDC_IP_EDIT, g_VncIP, sizeof(g_VncIP));
                     g_VncPort = GetDlgItemInt(hDlg, IDC_PORT_EDIT, NULL, FALSE);
                     GetDlgItemText(hDlg, IDC_PASS_EDIT, g_VncPass, sizeof(g_VncPass));
-                    
+                    g_UseFastEncoding = SendDlgItemMessage(hDlg, IDC_FASTENC_CHK, BM_GETCHECK, 0, 0) == BST_CHECKED;
+
                     EndDialog(hDlg, IDOK);
                     return TRUE;
 
@@ -477,10 +480,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     BOOL bRunning = TRUE;
     DWORD result;
     int x, y, w, h, srcx, srcy;
+    SYSTEM_INFO si;
 
 #ifdef DEBUG
     fout = fopen("vncsclnt.log", "w");
 #endif
+
+    /* Check if CPU is slow to use Hextile */
+    GetSystemInfo(&si);
+    g_UseFastEncoding = (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL) && si.dwProcessorType <= PROCESSOR_INTEL_486;
 
     /* 1. Launch connection window first */
     result = DialogBox(hInstance, MAKEINTRESOURCE(IDD_CONNECT_DLG), NULL, (DLGPROC)ConnectDlgProc);
@@ -543,9 +551,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 #ifdef DEBUG
-	fprintf(fout,"WinMain: setup_vnc_encodings\n"),fflush(fout);
+	fprintf(fout,"WinMain: setup_vnc_encodings(%d)\n",g_UseFastEncoding),fflush(fout);
 #endif
-    if (!setup_vnc_encodings(&g_VncSock)) {
+    if (!setup_vnc_encodings(&g_VncSock, g_UseFastEncoding)) {
         MessageBox(NULL, "Failed to setup VNC encodings!", "Error", MB_ICONSTOP);
         return 0;
     }

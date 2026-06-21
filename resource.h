@@ -13,5 +13,6 @@
 #define IDC_IP_EDIT       1001
 #define IDC_PORT_EDIT     1002
 #define IDC_PASS_EDIT     1003
+#define IDC_FASTENC_CHK   1004
 
 #endif
