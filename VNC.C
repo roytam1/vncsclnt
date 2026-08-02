@@ -110,11 +110,11 @@ int sock_read(struct VncSocket* s, char* buffer, int len) {
         /* Ask recv to fill whatever is remaining in our requested length */
         n = recv(s->sock, buffer + total_read, read_bytes, 0);
 
-        if (n == 0) {
-            /* Connection was gracefully closed by the server */
+        /*if (n == 0) {
+            /* Connection was gracefully closed by the server * /
             return (total_read > 0) ? total_read : 0;
         } 
-        else if (n == SOCKET_ERROR) {
+        else */if (n == 0 || n == SOCKET_ERROR) {
             /* A network error occurred */
             return (total_read > 0) ? total_read : -1;
         }
@@ -156,11 +156,11 @@ int auth_vnc(struct VncSocket *fd, char *passwd)
 
 	sprintf(vmsg, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
 	sock_write(fd, vmsg, sz_rfbProtocolVersionMsg);
-	sock_read(fd, vmsg, sz_rfbProtocolVersionMsg);
+	if (sock_read(fd, vmsg, sz_rfbProtocolVersionMsg) < 0) goto auth_out;
 
 	pwlen = strlen(passwd);
 	i32 = rfbConnFailed;
-	sock_read(fd, (byte*)&i32, sizeof(i32));
+	if (sock_read(fd, (byte*)&i32, sizeof(i32)) < 0) goto auth_out;
 	i32 = ntohl(i32);
 
 	switch(i32) {
@@ -177,7 +177,7 @@ int auth_vnc(struct VncSocket *fd, char *passwd)
 		fprintf(fout,"Connection failed:"),fflush(fout);
 #endif
 		i32 = 0;
-		sock_read(fd, (byte*)&i32, sizeof(i32));
+		if (sock_read(fd, (byte*)&i32, sizeof(i32)) < 0) goto auth_out;
 		i32=ntohl(i32);
 		while (i32-- && (sock_read(fd, &x, sizeof(x))==sizeof(x))) {
 #ifdef DEBUG
@@ -278,14 +278,14 @@ int init_vnc_client(struct VncSocket *fd)
 	clientinit.shared = 1; // share
 	sock_write(fd, (byte*)&clientinit, sz_rfbClientInitMsg);
 
-	sock_read(fd, (byte*)&serverinit, sz_rfbServerInitMsg);
+	if(sock_read(fd, (byte*)&serverinit, sz_rfbServerInitMsg) < 0) return 0;
 
 	fb_width = ntohs(serverinit.framebufferWidth);
 	fb_height = ntohs(serverinit.framebufferHeight);
 
 	i32 = ntohl(serverinit.nameLength);
 	for (i=0; i<i32; i++)
-		sock_read(fd, i < 256 ? server_name+i : (byte*)&x, 1);
+		if(sock_read(fd, i < 256 ? server_name+i : (byte*)&x, 1) < 0) return 0;
 
 	return 1;
 }
