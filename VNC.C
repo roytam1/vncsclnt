@@ -25,6 +25,14 @@ unsigned long rfb_pos,rfb_total;
 char server_name[256];
 BOOL isWin32s = 0;
 
+#ifdef PERF
+/* Lightweight counters for the standalone perf harness (/DPERF). */
+long perf_sockread_calls = 0;
+long perf_recv_calls = 0;
+long perf_recv_bytes = 0;
+long perf_buffered_bytes = 0;
+#endif
+
 /* --- WATTCP Core Lifecycle Functions Translation --- */
 
 void sock_init(void) {
@@ -74,15 +82,35 @@ int socket_connect(struct VncSocket* s, char* host, int port) {
 }
 
 int tcp_tick(struct VncSocket* s) {
-    /* WATTCP requires manual processing ticks. Windows does this automatically.
-       We use Sleep(1) here to yield CPU time to Windows 95, preventing 
-       our infinite loop from pinning a 90s CPU to 100%. */
-    Sleep(1);
+    /* WATTCP required manual processing ticks; Windows does this itself.
+     * Do NOT sleep here: the main loop calls this on every iteration, and
+     * a 1 ms sleep per iteration throttles the decoder to ~2 states per
+     * 3 ms. A full CoRRE update can contain thousands of tiny rectangles,
+     * turning that into many seconds of pure sleeping. The main loop now
+     * yields only in the idle (no-data-ready) branch. */
     return (s->sock != INVALID_SOCKET);
 }
 
+/* ---------- Read-ahead buffering ----------------------------------------
+ * Winsock's recv() is costly on Win95/Win32s. RRE, CoRRE and Hextile read
+ * the stream one field (often a single byte) at a time, which otherwise
+ * means 10,000+ recv() syscalls per full-screen update. Serve those tiny
+ * reads from a persistent buffer instead; bytes left over belong to the
+ * next message and stay buffered for the next sock_read(). sock_dataready()
+ * must therefore report this buffer as "ready" so the state machine keeps
+ * advancing even after the socket itself has no more bytes queued.
+ * ----------------------------------------------------------------------- */
+#define SOCK_RBUF_SIZE 32767   /* Win32s Winsock 1.1 caps recv() at 32K */
+static char sock_rbuf[SOCK_RBUF_SIZE];
+static int  sock_rpos = 0;     /* next unread byte in sock_rbuf */
+static int  sock_rlen = 0;     /* number of valid bytes in sock_rbuf */
+
 int sock_dataready(struct VncSocket* s) {
     unsigned long bytesAvailable = 0;
+
+    /* Data already pulled off the socket is ready for the parser. */
+    if (sock_rpos < sock_rlen) return 1;
+
     /* Use ioctlsocket to check if data is waiting in the Windows network buffer */
     if (ioctlsocket(s->sock, FIONREAD, &bytesAvailable) == SOCKET_ERROR) {
         return 0;
@@ -91,40 +119,48 @@ int sock_dataready(struct VncSocket* s) {
 }
 
 void sock_close(struct VncSocket* s) {
+    sock_rpos = 0;
+    sock_rlen = 0;
     if (s->sock != INVALID_SOCKET) {
         closesocket(s->sock);
         s->sock = INVALID_SOCKET;
     }
 }
 
-/* Replaces WATTCP block reads */
-/* Upgraded sock_read: Guarantees ALL requested bytes are read before returning */
+/* Replaces WATTCP block reads. Guarantees ALL requested bytes are read
+ * before returning, serving them from the read-ahead buffer when possible. */
 int sock_read(struct VncSocket* s, char* buffer, int len) {
     int total_read = 0;
-    int bytes_left = len;
-    int n;
-    int read_bytes;
+#ifdef PERF
+    perf_sockread_calls++;
+#endif
 
     while (total_read < len) {
-        read_bytes = bytes_left > 32767 ? (isWin32s ? 32767 : bytes_left) : bytes_left;
-        /* Ask recv to fill whatever is remaining in our requested length */
-        n = recv(s->sock, buffer + total_read, read_bytes, 0);
-
-        /*if (n == 0) {
-            /* Connection was gracefully closed by the server * /
-            return (total_read > 0) ? total_read : 0;
-        } 
-        else */if (n == 0 || n == SOCKET_ERROR) {
-            /* A network error occurred */
-            return (total_read > 0) ? total_read : -1;
+        if (sock_rpos < sock_rlen) {
+            int chunk = sock_rlen - sock_rpos;
+            if (chunk > len - total_read) chunk = len - total_read;
+            memcpy(buffer + total_read, sock_rbuf + sock_rpos, chunk);
+            sock_rpos += chunk;
+            total_read += chunk;
+#ifdef PERF
+            perf_buffered_bytes += chunk;
+#endif
+        } else {
+            int n;
+            /* Buffer empty: refill with one syscall's worth of data. */
+            n = recv(s->sock, sock_rbuf, SOCK_RBUF_SIZE, 0);
+#ifdef PERF
+            perf_recv_calls++;
+            if (n > 0) perf_recv_bytes += n;
+#endif
+            sock_rpos = 0;
+            if (n == 0 || n == SOCKET_ERROR) {
+                return (total_read > 0) ? total_read : -1;
+            }
+            sock_rlen = n;
         }
-
-        /* Shift our tracking variables forward by the amount we just received */
-        total_read += n;
-        bytes_left -= n;
     }
 
-    /* We successfully grabbed every single byte the parser asked for! */
     return total_read;
 }
 
@@ -334,7 +370,7 @@ int setup_vnc_encodings(struct VncSocket *fd, int useFast)
 	enc[0] = useFast ? htonl(rfbEncodingRaw) : htonl(rfbEncodingHextile);
 	enc[1] = htonl(rfbEncodingCopyRect);
 	enc[2] = htonl(rfbEncodingRRE);
-	enc[3] = useFast ? htonl(rfbEncodingHextile) : htonl(rfbEncodingRaw);;
+	enc[3] = useFast ? htonl(rfbEncodingHextile) : htonl(rfbEncodingRaw);
 	enc[4] = htonl(rfbEncodingCoRRE);
 	sock_write(fd, (byte*)encodingsmsgp, sz_enc);
 
@@ -473,6 +509,9 @@ int parse_vnc_rect(struct VncSocket *fd)
 			return ST_CRRE;
 		return ST_RRE;
 	case rfbEncodingHextile:
+		/* Hextile is self-delimiting (one blocking pass over all tiles),
+		 * so unlike Raw it has no upfront byte count to track. */
+		rfb_total = 0;
 		return ST_HEXTILE;
 	}
 	return ST_ERROR; // unknown encoding scheme
@@ -680,12 +719,12 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsi
             if (ty + 16 > *y + *h) th = *y + *h - ty;
 
             /* 1. Read the subencoding flag for this specific tile */
-            if (o = sock_read(fd, (char*)&subencoding, sizeof(CARD8)) < 0) return ST_ERROR;
+            if ((o = sock_read(fd, (char*)&subencoding, sizeof(CARD8))) < 0) return ST_ERROR;
             rfb_pos+=o;
 
             /* 2. Is it just raw uncompressed pixels? */
             if (subencoding & HEXTILE_RAW) {
-                if (o = sock_read(fd, tile_buf, tw * th) < 0) return ST_ERROR;
+                if ((o = sock_read(fd, tile_buf, tw * th)) < 0) return ST_ERROR;
                 rfb_pos+=o;
                 video_blk_mem(tx, ty, tw, th, tile_buf);
                 continue; /* Move to the next tile */
@@ -693,11 +732,11 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsi
 
             /* 3. Update stateful background/foreground colors if provided */
             if (subencoding & HEXTILE_BG_SPECIFIED) {
-                if (o = sock_read(fd, (char*)&bg_color, sizeof(CARD8)) < 0) return ST_ERROR;
+                if ((o = sock_read(fd, (char*)&bg_color, sizeof(CARD8))) < 0) return ST_ERROR;
                 rfb_pos+=o;
             }
             if (subencoding & HEXTILE_FG_SPECIFIED) {
-                if (o = sock_read(fd, (char*)&fg_color, sizeof(CARD8)) < 0) return ST_ERROR;
+                if ((o = sock_read(fd, (char*)&fg_color, sizeof(CARD8))) < 0) return ST_ERROR;
                 rfb_pos+=o;
             }
 
@@ -707,7 +746,7 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsi
             /* 5. Draw any colored sub-rectangles on top of the background */
             if (subencoding & HEXTILE_ANY_SUBRECTS) {
                 CARD8 num_subrects;
-                if (o = sock_read(fd, (char*)&num_subrects, sizeof(CARD8)) < 0) return ST_ERROR;
+                if ((o = sock_read(fd, (char*)&num_subrects, sizeof(CARD8))) < 0) return ST_ERROR;
                 rfb_pos+=o;
 
                 for (i = 0; i < num_subrects; i++) {
@@ -717,14 +756,14 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsi
 
                     /* If SUBRECTS_COLORED is set, this subrect has a unique color */
                     if (subencoding & HEXTILE_SUBRECTS_COLORED) {
-                        if (o = sock_read(fd, (char*)&sub_color, sizeof(CARD8)) < 0) return ST_ERROR;
+                        if ((o = sock_read(fd, (char*)&sub_color, sizeof(CARD8))) < 0) return ST_ERROR;
                         rfb_pos+=o;
                     }
 
                     /* Read geometry bytes */
-                    if (o = sock_read(fd, (char*)&xy, sizeof(CARD8)) < 0) return ST_ERROR;
+                    if ((o = sock_read(fd, (char*)&xy, sizeof(CARD8))) < 0) return ST_ERROR;
                     rfb_pos+=o;
-                    if (o = sock_read(fd, (char*)&wh, sizeof(CARD8)) < 0) return ST_ERROR;
+                    if ((o = sock_read(fd, (char*)&wh, sizeof(CARD8))) < 0) return ST_ERROR;
                     rfb_pos+=o;
 
                     /* Extract X/Y (high/low nibbles) and W/H (high/low nibbles + 1) */
@@ -748,11 +787,12 @@ int parse_vnc_hextile(struct VncSocket *fd, int *x, int *y, int *w, int *h, unsi
     /* tell surface to update */
     video_blk_upd(*x, *y, *w, *h);
 
-	if (rfb_pos>=rfb_total) {
-		rfb_rect++;
-		return ST_RECT;
-	} else 
-		return ST_HEXTILE;
+	/* The entire rectangle was consumed in one blocking pass, so there is
+	 * nothing to resume. The old rfb_pos/rfb_total test was invalid here:
+	 * Hextile never sets rfb_total, so it always returned ST_HEXTILE and
+	 * made the main loop re-parse (and desync) the same rectangle. */
+	rfb_rect++;
+	return ST_RECT;
 }
 
 int send_vnc_key(struct VncSocket *fd, int kbd, unsigned int keyData, int holdShift, int CapsOn)

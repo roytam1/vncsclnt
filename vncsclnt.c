@@ -638,6 +638,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 /* Periodic refresh check fallback replacing countdown() */
                 static DWORD lastRefresh = 0;
                 DWORD now = GetTickCount(); /* Win32 millisecond counter */
+
+                /* Nothing to decode: yield CPU to Win95/Win32s here rather
+                 * than on every parse iteration (see tcp_tick). */
+                Sleep(1);
                 if (!lastRefresh) lastRefresh = now;
                 if (now - lastRefresh > 220) {
 #ifdef DEBUG
