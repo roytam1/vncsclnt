@@ -3,6 +3,7 @@
 #include <winsock.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "resource.h"
 
@@ -10,10 +11,54 @@
 #include "vnc.h"
 
 /* --- Default configuration --- */
-char g_VncIP[64]   = "192.168.1.100"; /* Provide default values */
-int  g_VncPort     = 5900;
+#define DEFAULT_VNC_HOST "192.168.1.100"
+#define DEFAULT_VNC_PORT 5900
+
+#define INI_SECTION  "Connection"
+#define INI_KEY_HOST "Host"
+#define INI_KEY_PORT "Port"
+#define INI_FILENAME "vncsclnt.ini"
+
+char g_VncIP[64]   = DEFAULT_VNC_HOST; /* Overridden by vncsclnt.ini on startup */
+int  g_VncPort     = DEFAULT_VNC_PORT;
 char g_VncPass[10] = "";
 int  g_UseFastEncoding = FALSE;
+
+/* Keep settings beside the EXE instead of the Windows directory. */
+static char g_IniPath[MAX_PATH] = INI_FILENAME;
+
+static void config_init_path(HINSTANCE hInst) {
+    char* slash;
+
+    if (!GetModuleFileName(hInst, g_IniPath, MAX_PATH)) {
+        lstrcpyn(g_IniPath, INI_FILENAME, MAX_PATH);
+        return;
+    }
+    g_IniPath[MAX_PATH - 1] = '\0';
+    slash = strrchr(g_IniPath, '\\');
+    if (slash)
+        lstrcpyn(slash + 1, INI_FILENAME, MAX_PATH - (int)(slash + 1 - g_IniPath));
+    else
+        lstrcpyn(g_IniPath, INI_FILENAME, MAX_PATH);
+}
+
+static void config_load(void) {
+    g_VncPort = GetPrivateProfileInt(INI_SECTION, INI_KEY_PORT,
+                                     DEFAULT_VNC_PORT, g_IniPath);
+    if (g_VncPort < 1 || g_VncPort > 65535)
+        g_VncPort = DEFAULT_VNC_PORT;
+
+    GetPrivateProfileString(INI_SECTION, INI_KEY_HOST, DEFAULT_VNC_HOST,
+                            g_VncIP, sizeof(g_VncIP), g_IniPath);
+}
+
+static void config_save(void) {
+    char portStr[16];
+
+    wsprintf(portStr, "%d", g_VncPort);
+    WritePrivateProfileString(INI_SECTION, INI_KEY_HOST, g_VncIP, g_IniPath);
+    WritePrivateProfileString(INI_SECTION, INI_KEY_PORT, portStr, g_IniPath);
+}
 
 /* --- External VNC Library Functions (Assumed from your repo) --- */
 #include "vnc.h"
@@ -461,6 +506,9 @@ BOOL CALLBACK ConnectDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
                     GetDlgItemText(hDlg, IDC_PASS_EDIT, g_VncPass, sizeof(g_VncPass));
                     g_UseFastEncoding = SendDlgItemMessage(hDlg, IDC_FASTENC_CHK, BM_GETCHECK, 0, 0) == BST_CHECKED;
 
+                    /* Remember host/port for next launch (never the password). */
+                    config_save();
+
                     EndDialog(hDlg, IDOK);
                     return TRUE;
 
@@ -485,6 +533,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #ifdef DEBUG
     fout = fopen("vncsclnt.log", "w");
 #endif
+
+    g_hInst = hInstance;
+    config_init_path(hInstance);
+    config_load();
 
     /* Check if CPU is slow to use Hextile */
     GetSystemInfo(&si);
